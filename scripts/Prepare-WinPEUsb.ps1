@@ -9,6 +9,7 @@ It then turns a selected USB disk into:
 
 - Partition 1: FAT32, bootable, contains the WinPE runtime.
 - Partition 2: NTFS, contains \sources\install.wim and the marker file used by deploy.cmd.
+- Optionally, \payload\docker-images\*.tar used by the first-logon importer inside the deployed OS.
 
 Why two partitions:
 - FAT32 keeps UEFI firmware boot compatibility high.
@@ -26,6 +27,8 @@ param(
     [string]$WinPEWorkDir = 'C:\WinPE_AutoDeploy_amd64',
 
     [string]$InstallWimPath = 'C:\WorkSpace\Win11_Custom\install.wim',
+
+    [string]$DockerImagesDirectory,
 
     [ValidateRange(2048, 32768)]
     [int]$BootPartitionSizeMB = 4096,
@@ -150,6 +153,10 @@ if (-not (Test-Path -LiteralPath $InstallWimPath)) {
     throw "install.wim was not found at $InstallWimPath"
 }
 
+if ($DockerImagesDirectory -and -not (Test-Path -LiteralPath $DockerImagesDirectory)) {
+    throw "The Docker images directory was not found at $DockerImagesDirectory"
+}
+
 $installWim = Get-Item -LiteralPath $InstallWimPath
 $disk = Get-Disk -Number $UsbDiskNumber -ErrorAction Stop
 
@@ -233,8 +240,21 @@ Set-Content -LiteralPath $tagPath -Value @(
     ('SourceWim={0}' -f $InstallWimPath)
 ) -Encoding ASCII
 
+if ($DockerImagesDirectory) {
+    $dockerPayloadDir = "{0}:\payload\docker-images" -f $imageDriveLetter
+    New-Item -ItemType Directory -Path $dockerPayloadDir -Force | Out-Null
+
+    Write-Host "Copying Docker image tar files to $dockerPayloadDir" -ForegroundColor Cyan
+    Get-ChildItem -LiteralPath $DockerImagesDirectory -Filter *.tar -File | ForEach-Object {
+        Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $dockerPayloadDir $_.Name) -Force
+    }
+}
+
 Write-Host ''
 Write-Host ('USB preparation completed.' ) -ForegroundColor Green
 Write-Host ("Boot partition : {0}:" -f $bootDriveLetter) -ForegroundColor Green
 Write-Host ("Image partition: {0}:\sources\install.wim" -f $imageDriveLetter) -ForegroundColor Green
+if ($DockerImagesDirectory) {
+    Write-Host ("Docker payload: {0}:\payload\docker-images" -f $imageDriveLetter) -ForegroundColor Green
+}
 Write-Host 'Boot the target machine from this USB device. WinPE will scan mounted volumes for \sources\install.wim and start deployment automatically.' -ForegroundColor Green

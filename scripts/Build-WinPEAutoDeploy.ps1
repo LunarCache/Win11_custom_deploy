@@ -11,7 +11,8 @@ an ISO by itself. Instead, it prepares a reusable WinPE work tree at $WinPEWorkD
 2. Runs copype.cmd to stage the standard WinPE files.
 3. Mounts media\sources\boot.wim.
 4. Drops the rendered deployment files into Windows\System32 inside the mounted image.
-5. Commits the boot.wim changes so every future ISO or USB build reuses the same automation.
+5. Also injects the first-logon automation templates used to import Docker payloads.
+6. Commits the boot.wim changes so every future ISO or USB build reuses the same automation.
 
 The two most common parameters you will customize later are:
 -WimIndex   Which image inside install.wim should be applied.
@@ -168,8 +169,15 @@ Set-AdkEnvironment -AdkRootPath $AdkRoot -TargetArchitecture $Architecture
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $templatesDir = Join-Path $repoRoot 'templates'
 
-# All three templates are injected into boot.wim, so fail early if one is missing.
-foreach ($requiredTemplate in @('deploy.cmd', 'diskpart-uefi.txt', 'startnet.cmd')) {
+# All injected templates are required for a complete build, so fail early if one is missing.
+foreach ($requiredTemplate in @(
+    'deploy.cmd',
+    'diskpart-uefi.txt',
+    'startnet.cmd',
+    'firstboot.ps1',
+    'register-firstboot.ps1',
+    'SetupComplete.cmd'
+)) {
     $templatePath = Join-Path $templatesDir $requiredTemplate
     if (-not (Test-Path -LiteralPath $templatePath)) {
         throw "Missing template file: $templatePath"
@@ -232,11 +240,14 @@ try {
         '__WIM_INDEX__'   = $WimIndex
     }
 
-    # The boot image only receives small launcher/config files.
+    # The boot image only receives launcher/config files and first-logon automation templates.
     # install.wim itself stays on the deployment media and is discovered at runtime.
     Write-RenderedTemplate -TemplatePath (Join-Path $templatesDir 'deploy.cmd') -DestinationPath (Join-Path $system32Dir 'deploy.cmd') -Tokens $tokens
     Write-RenderedTemplate -TemplatePath (Join-Path $templatesDir 'diskpart-uefi.txt') -DestinationPath (Join-Path $system32Dir 'diskpart-uefi.txt') -Tokens $tokens
     Write-RenderedTemplate -TemplatePath (Join-Path $templatesDir 'startnet.cmd') -DestinationPath (Join-Path $system32Dir 'startnet.cmd')
+    Write-RenderedTemplate -TemplatePath (Join-Path $templatesDir 'firstboot.ps1') -DestinationPath (Join-Path $system32Dir 'firstboot.ps1')
+    Write-RenderedTemplate -TemplatePath (Join-Path $templatesDir 'register-firstboot.ps1') -DestinationPath (Join-Path $system32Dir 'register-firstboot.ps1')
+    Write-RenderedTemplate -TemplatePath (Join-Path $templatesDir 'SetupComplete.cmd') -DestinationPath (Join-Path $system32Dir 'SetupComplete.cmd')
 
     $commitChanges = $true
 }

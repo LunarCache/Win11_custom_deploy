@@ -8,6 +8,7 @@ This workspace contains a reusable WinPE automation set for applying a single `i
 - Automatic scan of mounted volumes `C:` through `Z:` for `\sources\install.wim`
 - Automatic wipe of target `Disk 0`
 - Automatic `DISM /Apply-Image`, `BCDBoot`, and WinRE configuration
+- Optional first-logon Docker payload import from `C:\Payload\DockerImages`
 - Unified deployment log at `X:\AutoDeploy.log`
 
 ## Files
@@ -15,6 +16,9 @@ This workspace contains a reusable WinPE automation set for applying a single `i
 - `scripts\Build-WinPEAutoDeploy.ps1`
 - `scripts\Generate-WinPEIso.ps1`
 - `scripts\Prepare-WinPEUsb.ps1`
+- `templates\firstboot.ps1`
+- `templates\register-firstboot.ps1`
+- `templates\SetupComplete.cmd`
 - `templates\startnet.cmd`
 - `templates\deploy.cmd`
 - `templates\diskpart-uefi.txt`
@@ -26,7 +30,13 @@ Run these commands from a normal elevated PowerShell session. The scripts bootst
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass -Force
 .\scripts\Build-WinPEAutoDeploy.ps1 -Force -WinPEWorkDir C:\WinPE_AutoDeploy_amd64 -WimIndex 1 -TargetDisk 0
-.\scripts\Prepare-WinPEUsb.ps1 -UsbDiskNumber 2 -WinPEWorkDir C:\WinPE_AutoDeploy_amd64 -InstallWimPath C:\WorkSpace\Win11_Custom\install.wim
+.\scripts\Prepare-WinPEUsb.ps1 -UsbDiskNumber 1 -WinPEWorkDir C:\WinPE_AutoDeploy_amd64 -InstallWimPath C:\WorkSpace\Win11_Custom\install.wim
+```
+
+If you also want Docker image tar files copied to the deployment media:
+
+```powershell
+.\scripts\Prepare-WinPEUsb.ps1 -UsbDiskNumber 1 -WinPEWorkDir C:\WinPE_AutoDeploy_amd64 -InstallWimPath C:\WorkSpace\Win11_Custom\install.wim -DockerImagesDirectory C:\Payload\DockerImages
 ```
 
 To generate an ISO for VM testing after the WinPE work directory has been built:
@@ -44,8 +54,22 @@ To generate an ISO for VM testing after the WinPE work directory has been built:
 - Recovery partition metadata is finalized after the WinRE copy step, so the partition is writable during deployment and hidden again before reboot.
 - The deployment prefers `W:\Windows\System32\Recovery\Winre.wim` when it exists. If that file is missing after apply, deployment still completes; only WinRE remains disabled.
 - `X:\AutoDeploy.log` now uses explicit `[INFO]`, `[WARNING]`, and `[ERROR]` markers to make postmortem review easier.
+- If `\payload\docker-images` exists on the deployment media, WinPE copies it into `C:\Payload\DockerImages` inside the deployed OS.
+- `SetupComplete.cmd` registers a persistent HKLM Run entry, and `firstboot.ps1` removes that entry only after all Docker tar files import successfully. This allows automatic retry on later logons if Docker is not ready on the first attempt.
 - To change the default target disk or WIM index, rebuild the WinPE work directory with different `-TargetDisk` or `-WimIndex` values.
 - `Generate-WinPEIso.ps1` creates a bootable WinPE ISO from the existing work directory. Use it for Hyper-V Gen 2 or other UEFI VM tests.
+
+## Payload layout
+
+- Deployment media source partition:
+  - `\sources\install.wim`
+  - `\sources\winpe-autodeploy.tag`
+  - `\payload\docker-images\*.tar` (optional)
+- Deployed OS after WinPE staging:
+  - `C:\Payload\DockerImages\*.tar`
+  - `C:\ProgramData\FirstBoot\firstboot.ps1`
+  - `C:\ProgramData\FirstBoot\register-firstboot.ps1`
+  - `C:\Windows\Setup\Scripts\SetupComplete.cmd`
 
 ## Partition layout notes
 

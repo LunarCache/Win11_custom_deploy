@@ -7,7 +7,8 @@ rem 1. Find exactly one prepared install.wim source.
 rem 2. Partition the target disk according to diskpart-uefi.txt.
 rem 3. Apply the selected image to W: and make it bootable.
 rem 4. If embedded WinRE exists, copy it into the Recovery partition and register it.
-rem 5. Finalize Recovery partition metadata so Windows treats it as a hidden recovery volume.
+rem 5. Stage first-logon automation files and optional Docker image payloads.
+rem 6. Finalize Recovery partition metadata so Windows treats it as a hidden recovery volume.
 
 rem These tokens are rendered by Build-WinPEAutoDeploy.ps1 when boot.wim is customized.
 set "TARGET_DISK=__TARGET_DISK__"
@@ -23,6 +24,7 @@ set "SOURCE_TAG=winpe-autodeploy.tag"
 rem Recovery GUID used by Windows for the final GPT recovery partition type.
 set "RECOVERY_GUID=de94bba4-06d1-4d40-a16a-bfd50179d6ac"
 set "WIM_PATH="
+set "SOURCE_MEDIA_DRIVE="
 set "MATCH_COUNT=0"
 
 > "%LOG%" (
@@ -50,6 +52,7 @@ if not "%MATCH_COUNT%"=="1" (
 )
 
 set "WIM_PATH=!WIM_CANDIDATE_1!"
+for %%I in ("!WIM_PATH!") do set "SOURCE_MEDIA_DRIVE=%%~dI"
 call :log_info "Using image file: !WIM_PATH!"
 
 if not exist "!SCRIPT_DIR!diskpart-uefi.txt" (
@@ -118,6 +121,7 @@ if errorlevel 1 (
 )
 
 call :configure_winre
+call :stage_firstboot_assets
 
 rem Only after the copy is finished do we hide/tag the Recovery partition as a real Windows recovery volume.
 call :finalize_recovery_partition
@@ -162,6 +166,71 @@ if errorlevel 1 (
 call :log_info "WinRE configured successfully."
 exit /b 0
 
+:stage_firstboot_assets
+call :log_info "Staging first-logon automation assets"
+
+if not exist "W:\ProgramData\FirstBoot" md W:\ProgramData\FirstBoot >> "%LOG%" 2>&1
+if not exist "W:\Windows\Setup\Scripts" md W:\Windows\Setup\Scripts >> "%LOG%" 2>&1
+
+if not exist "!SCRIPT_DIR!firstboot.ps1" (
+    call :log_warning "Missing firstboot.ps1 in WinPE runtime. Docker payload import will not be available."
+    exit /b 0
+)
+
+if not exist "!SCRIPT_DIR!register-firstboot.ps1" (
+    call :log_warning "Missing register-firstboot.ps1 in WinPE runtime. Docker payload import will not be available."
+    exit /b 0
+)
+
+if not exist "!SCRIPT_DIR!SetupComplete.cmd" (
+    call :log_warning "Missing SetupComplete.cmd in WinPE runtime. Docker payload import will not be available."
+    exit /b 0
+)
+
+copy /y "!SCRIPT_DIR!firstboot.ps1" "W:\ProgramData\FirstBoot\firstboot.ps1" >> "%LOG%" 2>&1
+if errorlevel 1 (
+    call :log_warning "Failed to stage firstboot.ps1 into the deployed OS."
+    exit /b 0
+)
+
+copy /y "!SCRIPT_DIR!register-firstboot.ps1" "W:\ProgramData\FirstBoot\register-firstboot.ps1" >> "%LOG%" 2>&1
+if errorlevel 1 (
+    call :log_warning "Failed to stage register-firstboot.ps1 into the deployed OS."
+    exit /b 0
+)
+
+copy /y "!SCRIPT_DIR!SetupComplete.cmd" "W:\Windows\Setup\Scripts\SetupComplete.cmd" >> "%LOG%" 2>&1
+if errorlevel 1 (
+    call :log_warning "Failed to stage SetupComplete.cmd into the deployed OS."
+    exit /b 0
+)
+
+call :stage_docker_payloads
+exit /b 0
+
+:stage_docker_payloads
+if not defined SOURCE_MEDIA_DRIVE (
+    call :log_warning "Source media drive was not captured. Skipping Docker payload staging."
+    exit /b 0
+)
+
+set "DOCKER_PAYLOAD_SOURCE=!SOURCE_MEDIA_DRIVE!\payload\docker-images"
+if not exist "!DOCKER_PAYLOAD_SOURCE!" (
+    call :log_info "No Docker payload directory was found on the deployment media."
+    exit /b 0
+)
+
+call :log_info "Copying Docker payloads from !DOCKER_PAYLOAD_SOURCE! to W:\Payload\DockerImages"
+if not exist "W:\Payload\DockerImages" md W:\Payload\DockerImages >> "%LOG%" 2>&1
+xcopy /E /I /Y "!DOCKER_PAYLOAD_SOURCE!" "W:\Payload\DockerImages\" >> "%LOG%" 2>&1
+if errorlevel 1 (
+    call :log_warning "Failed to copy Docker payload files into the deployed OS."
+    exit /b 0
+)
+
+call :log_info "Docker payloads staged successfully."
+exit /b 0
+
 :finalize_recovery_partition
 set "RECOVERY_DISKPART=X:\diskpart-recovery-finalize.txt"
 call :log_info "Finalizing recovery partition metadata"
@@ -188,6 +257,7 @@ exit /b 0
 :scan_sources
 call :log_info "Scanning C: through Z: for \sources\install.wim on prepared USB data volumes"
 set "WIM_PATH="
+set "SOURCE_MEDIA_DRIVE="
 set "MATCH_COUNT=0"
 for /L %%I in (1,1,25) do set "WIM_CANDIDATE_%%I="
 
