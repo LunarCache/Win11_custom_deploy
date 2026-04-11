@@ -6,7 +6,7 @@ rem High-level flow:
 rem 1. Find exactly one prepared install.wim source.
 rem 2. Partition the target disk according to diskpart-uefi.txt.
 rem 3. Apply the selected image to W: and make it bootable.
-rem 4. Attempt to register WinRE from the applied Windows partition.
+rem 4. Prepare the WinRE path from the applied Windows partition.
 rem 5. Stage first-logon automation files and optional Docker payloads.
 rem 6. Preserve the deployment log and reboot.
 rem 5. Stage first-logon automation files and optional Docker image payloads.
@@ -128,20 +128,14 @@ wpeutil reboot
 exit /b 0
 
 :configure_winre
-call :log_info "Attempting to register WinRE from W:\Windows\System32\Recovery"
+call :log_info "Setting WinRE path to W:\Windows\System32\Recovery"
 reagentc /Setreimage /Path W:\Windows\System32\Recovery /Target W:\Windows >> "%LOG%" 2>&1
 if errorlevel 1 (
-    call :log_warning "reagentc /Setreimage failed. WinRE will remain disabled."
+    call :log_warning "reagentc /Setreimage failed. SetupComplete will attempt to enable WinRE later if possible."
     exit /b 0
 )
 
-reagentc /Enable /Target W:\Windows >> "%LOG%" 2>&1
-if errorlevel 1 (
-    call :log_warning "reagentc /Enable failed. WinRE will remain disabled."
-    exit /b 0
-)
-
-call :log_info "WinRE configured successfully."
+call :log_info "WinRE path configured successfully. SetupComplete will enable WinRE."
 exit /b 0
 
 :stage_firstboot_assets
