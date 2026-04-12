@@ -8,6 +8,7 @@ This workspace contains a reusable WinPE automation set for applying a single `i
 - Automatic scan of mounted volumes `C:` through `Z:` for `\sources\install.wim`
 - Automatic wipe of target `Disk 0`
 - Automatic `DISM /Apply-Image`, `BCDBoot`, WinRE path registration, and SetupComplete WinRE enable
+- Offline OOBE configuration that allows skipping the network requirement on first boot
 - Optional first-logon Docker payload import from `C:\Payload\DockerImages`
 - Unified deployment log at `X:\AutoDeploy.log`
 
@@ -53,6 +54,7 @@ To generate an ISO for VM testing after the WinPE work directory has been built:
 - The prepared USB data partition also gets a `\sources\winpe-autodeploy.tag` marker. The WinPE deploy script requires both files, which prevents it from accidentally picking up an unrelated `install.wim` on an internal disk.
 - The Recovery partition is created with its final GPT type and hidden attributes directly during `diskpart` execution.
 - The deployment sets the WinRE path to `W:\Windows\System32\Recovery` during WinPE. `SetupComplete.cmd` then runs `reagentc /enable` inside the deployed OS. If either step fails, deployment still completes; only WinRE remains disabled.
+- The deployment also writes `BypassNRO=1` into the offline SOFTWARE hive so Windows OOBE can skip the network requirement on first boot.
 - `X:\AutoDeploy.log` now uses explicit `[INFO]`, `[WARNING]`, and `[ERROR]` markers to make postmortem review easier.
 - Before WinPE reboots or stops on an error, it also tries to preserve the current log to the deployed OS at `C:\Windows\Temp\AutoDeploy.log` and to the deployment media at `\DeployLogs\AutoDeploy.log` when those destinations are available.
 - If `\payload\docker-images` exists on the deployment media, WinPE copies it into `C:\Payload\DockerImages` inside the deployed OS.
