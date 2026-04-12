@@ -234,6 +234,30 @@ try {
     )
     $mounted = $true
 
+    # Inject optional components (OCs) required for runtime automation.
+    # WinPE-WinReCfg provides reagentc.exe, used for offline WinRE registration.
+    $winPeOcPath = Join-Path $env:WinPERootNoArch "$Architecture\WinPE_OCs"
+    $winReCfgCab = Join-Path $winPeOcPath 'WinPE-WinReCfg.cab'
+    $winReCfgEnUsCab = Join-Path $winPeOcPath 'en-us\WinPE-WinReCfg_en-us.cab'
+
+    if (Test-Path -LiteralPath $winReCfgCab) {
+        Write-Host "Injecting WinPE-WinReCfg component..." -ForegroundColor Cyan
+        Invoke-ExternalCommand -FilePath $dismPath -Arguments @(
+            '/Add-Package',
+            "/Image:$mountDir",
+            "/PackagePath:$winReCfgCab"
+        )
+        if (Test-Path -LiteralPath $winReCfgEnUsCab) {
+            Invoke-ExternalCommand -FilePath $dismPath -Arguments @(
+                '/Add-Package',
+                "/Image:$mountDir",
+                "/PackagePath:$winReCfgEnUsCab"
+            )
+        }
+    } else {
+        Write-Warning "WinPE-WinReCfg.cab not found at $winReCfgCab. reagentc may not be available in WinPE."
+    }
+
     $system32Dir = Join-Path $mountDir 'Windows\System32'
     $tokens = @{
         '__TARGET_DISK__' = $TargetDisk
