@@ -54,7 +54,7 @@ To generate an ISO for VM testing after the WinPE work directory has been built:
 - The deploy script only accepts exactly one `\sources\install.wim`. If zero or multiple matches are found, deployment stops before any target disk changes are made.
 - The prepared USB data partition also gets a `\sources\winpe-autodeploy.tag` marker. The WinPE deploy script requires both files, which prevents it from accidentally picking up an unrelated `install.wim` on an internal disk.
 - The Recovery partition is created with its final GPT type and hidden attributes directly during `diskpart` execution.
-- The deployment sets the WinRE path to `W:\Windows\System32\Recovery` during WinPE. `SetupComplete.cmd` then runs `reagentc /enable` inside the deployed OS. If either step fails, deployment still completes; only WinRE remains disabled.
+- The deployment sets the WinRE path to `W:\Windows\System32\Recovery` during WinPE using `reagentc /Setreimage`. Since `Build-WinPEAutoDeploy.ps1` now injects the `WinPE-WinReCfg` component, this configuration is performed natively in the WinPE environment. `SetupComplete.cmd` then runs `reagentc /enable` inside the deployed OS to finalize the recovery environment activation.
 - The deployment also writes `BypassNRO=1` into the offline SOFTWARE hive so Windows OOBE can skip the network requirement on first boot.
 - `X:\AutoDeploy.log` now uses explicit `[INFO]`, `[WARNING]`, and `[ERROR]` markers to make postmortem review easier.
 - Before WinPE reboots or stops on an error, it also tries to preserve the current log to the deployed OS at `C:\Windows\Temp\AutoDeploy.log` and to the deployment media at `\DeployLogs\AutoDeploy.log` when those destinations are available.
