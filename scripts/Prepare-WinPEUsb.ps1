@@ -189,9 +189,14 @@ if ($disk.IsReadOnly) {
 }
 
 # Start with a clean removable disk so partition numbering and drive letters are predictable.
-Write-Host "Clearing disk $UsbDiskNumber" -ForegroundColor Yellow
+Write-Host "Clearing and initializing disk $UsbDiskNumber..." -ForegroundColor Yellow
 Clear-Disk -Number $UsbDiskNumber -RemoveData -RemoveOEM -Confirm:$false
-Initialize-Disk -Number $UsbDiskNumber -PartitionStyle MBR
+
+# Small sleep ensures Windows has recognized the 'uninitialized' state before we try to set it.
+Start-Sleep -Seconds 2
+
+# Silently ignore if the disk is already in the target style (MBR).
+Initialize-Disk -Number $UsbDiskNumber -PartitionStyle MBR -ErrorAction SilentlyContinue
 
 # The first FAT32 partition is what firmware boots from.
 $bootPartition = New-Partition -DiskNumber $UsbDiskNumber -Size ([int64]$BootPartitionSizeMB * 1MB) -AssignDriveLetter
