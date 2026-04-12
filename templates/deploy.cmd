@@ -155,28 +155,20 @@ exit /b 0
 :configure_winre
 call :log_info "Setting WinRE path to W:\Windows\System32\Recovery"
 
-set "REAGENTC_EXE="
-rem First, try to use the tool within the WinPE environment (if injected successfully).
-if exist "X:\Windows\System32\reagentc.exe" (
-    set "REAGENTC_EXE=X:\Windows\System32\reagentc.exe"
-) else if exist "W:\Windows\System32\reagentc.exe" (
-    rem Fallback: Use the tool from the newly applied Windows image on W:.
-    call :log_info "reagentc not found in WinPE. Using reagentc from the deployed OS at W:\"
-    set "REAGENTC_EXE=W:\Windows\System32\reagentc.exe"
-)
-
-if not defined REAGENTC_EXE (
-    call :log_warning "reagentc.exe could not be found in WinPE (X:) or the deployed OS (W:)."
+rem Directly use the reagentc tool from the newly applied Windows image.
+rem This avoids the need to inject extra components into the WinPE image itself.
+if not exist "W:\Windows\System32\reagentc.exe" (
+    call :log_warning "reagentc.exe was not found in the deployed OS at W:\Windows\System32. WinRE configuration will be skipped."
     exit /b 0
 )
 
-"!REAGENTC_EXE!" /Setreimage /Path W:\Windows\System32\Recovery /Target W:\Windows >> "%LOG%" 2>&1
+"W:\Windows\System32\reagentc.exe" /Setreimage /Path W:\Windows\System32\Recovery /Target W:\Windows >> "%LOG%" 2>&1
 if errorlevel 1 (
     call :log_warning "reagentc /Setreimage failed with exit code !errorlevel!. SetupComplete will attempt to enable WinRE later."
     exit /b 0
 )
 
-call :log_info "WinRE path configured successfully using !REAGENTC_EXE!"
+call :log_info "WinRE path configured successfully using W:\Windows\System32\reagentc.exe"
 exit /b 0
 
 :stage_firstboot_assets
