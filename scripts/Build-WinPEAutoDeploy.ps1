@@ -235,27 +235,37 @@ try {
     $mounted = $true
 
     # Inject optional components (OCs) required for runtime automation.
+    # WinPE-WMI provides the foundation for Windows management tools.
     # WinPE-WinReCfg provides reagentc.exe, used for offline WinRE registration.
     $winPeOcPath = Join-Path $env:WinPERootNoArch "$Architecture\WinPE_OCs"
-    $winReCfgCab = Join-Path $winPeOcPath 'WinPE-WinReCfg.cab'
-    $winReCfgEnUsCab = Join-Path $winPeOcPath 'en-us\WinPE-WinReCfg_en-us.cab'
+    $requiredOCs = @('WinPE-WMI.cab', 'WinPE-WinReCfg.cab')
 
-    if (Test-Path -LiteralPath $winReCfgCab) {
-        Write-Host "Injecting WinPE-WinReCfg component..." -ForegroundColor Cyan
-        Invoke-ExternalCommand -FilePath $dismPath -Arguments @(
-            '/Add-Package',
-            "/Image:$mountDir",
-            "/PackagePath:$winReCfgCab"
-        )
-        if (Test-Path -LiteralPath $winReCfgEnUsCab) {
+    foreach ($oc in $requiredOCs) {
+        $ocPath = Join-Path $winPeOcPath $oc
+        if (Test-Path -LiteralPath $ocPath) {
+            Write-Host "Injecting component: $oc" -ForegroundColor Cyan
             Invoke-ExternalCommand -FilePath $dismPath -Arguments @(
                 '/Add-Package',
                 "/Image:$mountDir",
-                "/PackagePath:$winReCfgEnUsCab"
+                "/PackagePath:$ocPath"
             )
+
+            # Inject only zh-cn and en-us language packs for this OC.
+            $ocBaseName = $oc.Replace('.cab', '')
+            foreach ($lang in @('zh-cn', 'en-us')) {
+                $langCabPath = Join-Path $winPeOcPath "$lang\$ocBaseName`_$lang.cab"
+                if (Test-Path -LiteralPath $langCabPath) {
+                    Write-Host "  + Injecting language pack: $lang" -ForegroundColor Gray
+                    Invoke-ExternalCommand -FilePath $dismPath -Arguments @(
+                        '/Add-Package',
+                        "/Image:$mountDir",
+                        "/PackagePath:$langCabPath"
+                    )
+                }
+            }
+        } else {
+            Write-Warning "Required OC not found at $ocPath. reagentc may not be available in WinPE."
         }
-    } else {
-        Write-Warning "WinPE-WinReCfg.cab not found at $winReCfgCab. reagentc may not be available in WinPE."
     }
 
     $system32Dir = Join-Path $mountDir 'Windows\System32'

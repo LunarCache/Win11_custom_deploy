@@ -11,13 +11,13 @@ This project provides a reusable automation framework for UEFI-only WinPE deploy
 ## Key Components
 
 ### 1. Build & Authoring (`scripts/`)
-- `Build-WinPEAutoDeploy.ps1`: Prepares the WinPE work directory. It injects the automation scripts into `boot.wim`, renders configuration tokens (Target Disk, WIM Index), and injects the `WinPE-WinReCfg` optional component to provide `reagentc` support.
+- `Build-WinPEAutoDeploy.ps1`: Prepares the WinPE work directory. It injects the automation scripts into `boot.wim`, renders configuration tokens, and injects `WinPE-WMI` and `WinPE-WinReCfg` (specifically `zh-cn` and `en-us` language packs) to provide native `reagentc` support.
 - `Prepare-WinPEUsb.ps1`: Destructive script that formats a USB drive with two partitions and stages the `install.wim` and deployment markers.
 - `Generate-WinPEIso.ps1`: Creates a bootable ISO from the prepared work directory (useful for VM testing).
 
 ### 2. WinPE Runtime (`templates/`)
 - `startnet.cmd`: The WinPE entry point. Initializes environment and calls `deploy.cmd`.
-- `deploy.cmd`: The main automation engine. Performs source discovery, disk partitioning via `diskpart-uefi.txt`, image application (DISM), and boot configuration (BCDBoot).
+- `deploy.cmd`: The main automation engine. Performs source discovery, disk partitioning, and image application. It utilizes an adaptive search logic for `reagentc.exe`, checking both the local WinPE environment and the deployed OS partition for maximum reliability.
 - `diskpart-uefi.txt`: Template for GPT partitioning (EFI, MSR, Windows, Recovery).
 
 ### 3. Post-Deployment (`templates/`)
