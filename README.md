@@ -49,6 +49,7 @@ To generate an ISO for VM testing after the WinPE work directory has been built:
 ## Notes
 
 - `Prepare-WinPEUsb.ps1` is destructive. It clears the selected USB disk and recreates it as a dual-partition device.
+- `Prepare-WinPEUsb.ps1` now defaults the FAT32 boot partition to `2048 MB`. Override it with `-BootPartitionSizeMB` if you need a different size.
 - The USB disk is initialized as `MBR` for broad removable-device firmware compatibility. The deployed target OS disk is still partitioned as `GPT`.
 - The deploy script only accepts exactly one `\sources\install.wim`. If zero or multiple matches are found, deployment stops before any target disk changes are made.
 - The prepared USB data partition also gets a `\sources\winpe-autodeploy.tag` marker. The WinPE deploy script requires both files, which prevents it from accidentally picking up an unrelated `install.wim` on an internal disk.

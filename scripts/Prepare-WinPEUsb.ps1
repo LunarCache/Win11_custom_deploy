@@ -30,8 +30,8 @@ param(
 
     [string]$DockerImagesDirectory,
 
-    [ValidateRange(2048, 32768)]
-    [int]$BootPartitionSizeMB = 4096,
+    [ValidateRange(1024, 32768)]
+    [int]$BootPartitionSizeMB = 2048,
 
     [string]$AdkRoot = 'C:\Program Files (x86)\Windows Kits\10\Assessment and Deployment Kit'
 )
