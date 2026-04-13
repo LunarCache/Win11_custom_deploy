@@ -200,15 +200,9 @@ if not defined SOURCE_MEDIA_DRIVE (
     exit /b 0
 )
 
-set "DOCKER_PAYLOAD_SOURCE="
-if exist "!SOURCE_MEDIA_DRIVE!\payload\docker-images" (
-    set "DOCKER_PAYLOAD_SOURCE=!SOURCE_MEDIA_DRIVE!\payload\docker-images"
-) else if exist "!SOURCE_MEDIA_DRIVE!\sources\win11-install" (
-    set "DOCKER_PAYLOAD_SOURCE=!SOURCE_MEDIA_DRIVE!\sources\win11-install"
-)
-
-if not defined DOCKER_PAYLOAD_SOURCE (
-    call :log_info "No payload directory found on deployment media (checked \payload\docker-images and \sources\win11-install)."
+set "DOCKER_PAYLOAD_SOURCE=!SOURCE_MEDIA_DRIVE!\payload\docker-images"
+if not exist "!DOCKER_PAYLOAD_SOURCE!" (
+    call :log_info "No payload directory found on deployment media at \payload\docker-images."
     exit /b 0
 )
 
@@ -243,42 +237,6 @@ set "SOURCE_MEDIA_DRIVE="
 set "MEDIA_LOG_DIR="
 set "MATCH_COUNT=0"
 for /L %%I in (1,1,25) do set "WIM_CANDIDATE_%%I="
-
-rem WinPE drive letters are not stable across hardware, so scan a range instead of hard-coding one letter.
-for %%D in (C D E F G H I J K L M N O P Q R S T U V W X Y Z) do (
-    if exist "%%D:\sources\install.wim" if exist "%%D:\sources\!SOURCE_TAG!" (
-        set /a MATCH_COUNT+=1
-        set "WIM_CANDIDATE_!MATCH_COUNT!=%%D:\sources\install.wim"
-        call :log_info "Found candidate !MATCH_COUNT!: %%D:\sources\install.wim"
-    )
-)
-exit /b 0
-
-:log_info
-call :log_line INFO "%~1"
-exit /b 0
-
-:log_warning
-call :log_line WARNING "%~1"
-exit /b 0
-
-:log_error
-call :log_line ERROR "%~1"
-exit /b 0
-
-:log_line
-echo [%DATE% %TIME%] [%~1] %~2
->> "%LOG%" echo [%DATE% %TIME%] [%~1] %~2
-exit /b 0
-
-:fail
-call :log_error "%~1"
-call :persist_logs
-echo.
-echo ERROR: %~1
-echo See %LOG% for details.
-pause
-exit /b 1
 
 rem WinPE drive letters are not stable across hardware, so scan a range instead of hard-coding one letter.
 for %%D in (C D E F G H I J K L M N O P Q R S T U V W X Y Z) do (
