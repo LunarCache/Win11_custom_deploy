@@ -91,7 +91,7 @@ function Set-AdkEnvironment {
     $env:PATH = $combinedPathEntries -join ';'
 }
 
-function Ensure-Directory {
+function New-DirectoryIfMissing {
     param(
         [Parameter(Mandatory = $true)]
         [string]$Path
@@ -134,7 +134,7 @@ function Copy-DockerPayloadTree {
         throw "The Docker images directory was not found at $SourceDirectory"
     }
 
-    Ensure-Directory -Path $DestinationDirectory
+    New-DirectoryIfMissing -Path $DestinationDirectory
     Copy-Item -Path (Join-Path $SourceDirectory '*') -Destination $DestinationDirectory -Recurse -Force
 }
 

@@ -99,7 +99,7 @@ try {
 
         if ($resolvedInstallWimPath) {
             $sourceDir = Join-Path $stagingMediaDir 'sources'
-            Ensure-Directory -Path $sourceDir
+            New-DirectoryIfMissing -Path $sourceDir
 
             $destinationWimPath = Join-Path $sourceDir 'install.wim'
             Write-Host "Copying install.wim to $destinationWimPath..." -ForegroundColor Cyan
