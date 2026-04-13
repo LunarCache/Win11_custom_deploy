@@ -33,6 +33,11 @@ function Remove-RunRegistration {
     Remove-ItemProperty -Path $runKeyPath -Name $runValueName -ErrorAction SilentlyContinue
 }
 
+function Mark-Completed {
+    New-Item -ItemType File -Path $markerPath -Force | Out-Null
+    Remove-RunRegistration
+}
+
 function Resolve-DockerCommand {
     $dockerCommand = Get-Command docker.exe -ErrorAction SilentlyContinue
     if ($dockerCommand) {
@@ -89,6 +94,45 @@ function Wait-DockerReady {
     return $false
 }
 
+function Invoke-PayloadScript {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ScriptPath,
+
+        [Parameter(Mandatory = $true)]
+        [string]$DisplayName,
+
+        [switch]$VisibleWindow
+    )
+
+    Write-Log -Level 'INFO' -Message ("Executing {0}: {1}" -f $DisplayName, $ScriptPath)
+
+    try {
+        $startProcessArgs = @{
+            FilePath = $ScriptPath
+            Wait     = $true
+            PassThru = $true
+        }
+
+        if ($VisibleWindow) {
+            $startProcessArgs.WindowStyle = 'Normal'
+        }
+
+        $process = Start-Process @startProcessArgs
+        if ($process.ExitCode -eq 0) {
+            Write-Log -Level 'INFO' -Message ("{0} finished with exit code 0." -f $DisplayName)
+            return $true
+        }
+
+        Write-Log -Level 'WARNING' -Message ("{0} finished with non-zero exit code {1}. Setup will retry on the next logon." -f $DisplayName, $process.ExitCode)
+        return $false
+    }
+    catch {
+        Write-Log -Level 'ERROR' -Message ("Failed to execute {0}: {1}" -f $DisplayName, $_.Exception.Message)
+        return $false
+    }
+}
+
 if (-not (Test-Path -LiteralPath $baseDir)) {
     New-Item -ItemType Directory -Path $baseDir -Force | Out-Null
 }
@@ -103,8 +147,7 @@ if (Test-Path -LiteralPath $markerPath) {
 
 if (-not (Test-Path -LiteralPath $dockerPayloadDir)) {
     Write-Log -Level 'INFO' -Message 'No payload directory exists at C:\Payload\DockerImages. Skipping setup.'
-    New-Item -ItemType File -Path $markerPath -Force | Out-Null
-    Remove-RunRegistration
+    Mark-Completed
     exit 0
 }
 
@@ -119,32 +162,28 @@ if (-not (Wait-DockerReady -DockerExe $dockerExe)) {
     exit 1
 }
 
+$payloadFailed = $false
+
 $loadImagesScript = Join-Path $dockerPayloadDir 'load_images.bat'
 if (Test-Path -LiteralPath $loadImagesScript) {
-    Write-Log -Level 'INFO' -Message ("Executing docker images load script: {0}" -f $loadImagesScript)
-    try {
-        $process = Start-Process -FilePath $loadImagesScript -Wait -PassThru
-        Write-Log -Level 'INFO' -Message ("Load script finished with exit code {0}." -f $process.ExitCode)
-    }
-    catch {
-        Write-Log -Level 'ERROR' -Message ("Failed to execute load script: {0}" -f $_.Exception.Message)
+    if (-not (Invoke-PayloadScript -ScriptPath $loadImagesScript -DisplayName 'docker image load script')) {
+        $payloadFailed = $true
     }
 }
 
 $appstoreScript = Join-Path $dockerPayloadDir 'install_appstore.bat'
 if (Test-Path -LiteralPath $appstoreScript) {
-    Write-Log -Level 'INFO' -Message ("Executing appstore setup script: {0}" -f $appstoreScript)
-    try {
-        # Start the batch script in a visible window so the user can see progress and the final 'pause'.
-        $process = Start-Process -FilePath $appstoreScript -Wait -PassThru
-        Write-Log -Level 'INFO' -Message ("Appstore setup script finished with exit code {0}." -f $process.ExitCode)
-    }
-    catch {
-        Write-Log -Level 'ERROR' -Message ("Failed to execute appstore setup script: {0}" -f $_.Exception.Message)
+    # Start the batch script in a visible window so the user can see progress and the final 'pause'.
+    if (-not (Invoke-PayloadScript -ScriptPath $appstoreScript -DisplayName 'appstore setup script' -VisibleWindow)) {
+        $payloadFailed = $true
     }
 }
 
-New-Item -ItemType File -Path $markerPath -Force | Out-Null
+if ($payloadFailed) {
+    Write-Log -Level 'WARNING' -Message 'One or more payload scripts failed. Setup will retry on the next logon.'
+    exit 1
+}
+
+Mark-Completed
 Write-Log -Level 'INFO' -Message 'Payload setup completed successfully.'
-Remove-RunRegistration
 exit 0

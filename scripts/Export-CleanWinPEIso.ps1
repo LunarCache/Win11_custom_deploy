@@ -33,29 +33,15 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
+$helpersPath = Join-Path $PSScriptRoot 'Common-WinPEHelpers.ps1'
+. $helpersPath
+
 if (-not $WinPEWorkDir) {
     $WinPEWorkDir = 'C:\WinPE_Clean_amd64'
 }
 
 if (-not $IsoPath) {
     $IsoPath = 'C:\WinPE_Clean_amd64.iso'
-}
-
-function Invoke-ExternalCommand {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$FilePath,
-
-        [Parameter()]
-        [string[]]$Arguments = @()
-    )
-
-    Write-Host ('>> {0} {1}' -f $FilePath, ($Arguments -join ' ')) -ForegroundColor Cyan
-    & $FilePath @Arguments
-
-    if ($LASTEXITCODE -ne 0) {
-        throw ("Command failed with exit code {0}: {1} {2}" -f $LASTEXITCODE, $FilePath, ($Arguments -join ' '))
-    }
 }
 
 function Test-CleanWinPEMediaReady {
@@ -77,73 +63,6 @@ function Test-CleanWinPEMediaReady {
     }
 
     return $true
-}
-
-function Set-AdkEnvironment {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$AdkRootPath,
-
-        [Parameter(Mandatory = $true)]
-        [string]$TargetArchitecture
-    )
-
-    $deploymentToolsRoot = Join-Path $AdkRootPath 'Deployment Tools'
-    $architectureToolsRoot = Join-Path $deploymentToolsRoot $TargetArchitecture
-    $winPeRoot = Join-Path $AdkRootPath 'Windows Preinstallation Environment'
-
-    $requiredPaths = @(
-        $deploymentToolsRoot,
-        $architectureToolsRoot,
-        $winPeRoot,
-        (Join-Path $architectureToolsRoot 'DISM'),
-        (Join-Path $architectureToolsRoot 'BCDBoot'),
-        (Join-Path $architectureToolsRoot 'Oscdimg')
-    )
-
-    foreach ($path in $requiredPaths) {
-        if (-not (Test-Path -LiteralPath $path)) {
-            throw "Required ADK path was not found: $path"
-        }
-    }
-
-    $env:DandIRoot = $deploymentToolsRoot
-    $env:WinPERoot = $winPeRoot
-    $env:WinPERootNoArch = $winPeRoot
-    $env:WindowsSetupRootNoArch = Join-Path $AdkRootPath 'Windows Setup'
-    $env:USMTRootNoArch = Join-Path $AdkRootPath 'User State Migration Tool'
-    $env:DISMRoot = Join-Path $architectureToolsRoot 'DISM'
-    $env:BCDBootRoot = Join-Path $architectureToolsRoot 'BCDBoot'
-    $imagingRoot = Join-Path $architectureToolsRoot 'Imaging'
-    $env:ImagingRoot = if (Test-Path -LiteralPath $imagingRoot) { $imagingRoot } else { $null }
-    $env:OSCDImgRoot = Join-Path $architectureToolsRoot 'Oscdimg'
-    $wdsmcastRoot = Join-Path $architectureToolsRoot 'Wdsmcast'
-    $env:WdsmcastRoot = if (Test-Path -LiteralPath $wdsmcastRoot) { $wdsmcastRoot } else { $null }
-
-    $adkToolPaths = @(
-        $env:DISMRoot,
-        $env:ImagingRoot,
-        $env:BCDBootRoot,
-        $env:OSCDImgRoot,
-        $env:WdsmcastRoot,
-        $env:WinPERoot
-    ) | Where-Object { $_ }
-
-    $existingPathEntries = @()
-    if ($env:PATH) {
-        $existingPathEntries = $env:PATH -split ';' | Where-Object { $_ }
-    }
-
-    $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    $combinedPathEntries = [System.Collections.Generic.List[string]]::new()
-
-    foreach ($pathEntry in @($adkToolPaths + $existingPathEntries)) {
-        if ($pathEntry -and $seen.Add($pathEntry)) {
-            [void]$combinedPathEntries.Add($pathEntry)
-        }
-    }
-
-    $env:PATH = $combinedPathEntries -join ';'
 }
 
 Set-AdkEnvironment -AdkRootPath $AdkRoot -TargetArchitecture $Architecture

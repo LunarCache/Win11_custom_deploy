@@ -27,6 +27,8 @@ rem Recovery GUID used by Windows for the final GPT recovery partition type.
 set "WIM_PATH="
 set "SOURCE_MEDIA_DRIVE="
 set "MATCH_COUNT=0"
+set "CANDIDATE_LIST=X:\wim-candidates.txt"
+set "DEPLOYMENT_WARNINGS=0"
 
 > "%LOG%" (
     echo ==================================================
@@ -47,12 +49,12 @@ if "%MATCH_COUNT%"=="0" (
 
 if not "%MATCH_COUNT%"=="1" (
     call :log_info "Candidate list:"
-    for /L %%I in (1,1,%MATCH_COUNT%) do call :log_info "  %%I. !WIM_CANDIDATE_%%I!"
+    for /f "usebackq delims=" %%L in ("%CANDIDATE_LIST%") do call :log_info "  %%L"
     call :fail "Expected exactly one install.wim candidate, but found %MATCH_COUNT%."
     exit /b 1
 )
 
-set "WIM_PATH=!WIM_CANDIDATE_1!"
+set /p WIM_PATH=<"%CANDIDATE_LIST%"
 for %%I in ("!WIM_PATH!") do set "SOURCE_MEDIA_DRIVE=%%~dI"
 if defined SOURCE_MEDIA_DRIVE set "MEDIA_LOG_DIR=!SOURCE_MEDIA_DRIVE!\DeployLogs"
 call :log_info "Using image file: !WIM_PATH!"
@@ -62,25 +64,8 @@ if not exist "!SCRIPT_DIR!diskpart-uefi.txt" (
     exit /b 1
 )
 
-set "RUNTIME_DISKPART=X:\diskpart-runtime.txt"
-call :log_info "Rendering runtime DiskPart script at !RUNTIME_DISKPART!"
-> "!RUNTIME_DISKPART!" (
-    rem Replace the target-disk token at runtime so the static template stays reusable.
-    for /f "usebackq delims=" %%L in ("!SCRIPT_DIR!diskpart-uefi.txt") do (
-        set "LINE=%%L"
-        setlocal EnableDelayedExpansion
-        set "LINE=!LINE:__TARGET_DISK__=%TARGET_DISK%!"
-        echo(!LINE!
-        endlocal
-    )
-)
-if errorlevel 1 (
-    call :fail "Failed to write runtime DiskPart script to !RUNTIME_DISKPART!"
-    exit /b 1
-)
-
 call :log_info "Partitioning target disk"
-diskpart /s "!RUNTIME_DISKPART!" >> "%LOG%" 2>&1
+diskpart /s "!SCRIPT_DIR!diskpart-uefi.txt" >> "%LOG%" 2>&1
 if errorlevel 1 (
     call :fail "DiskPart failed. Review %LOG%."
     exit /b 1
@@ -118,10 +103,18 @@ if errorlevel 1 (
 )
 
 call :stage_unattend_xml
+call :handle_step_result "Stage unattend.xml"
 call :configure_winre
+call :handle_step_result "Configure WinRE"
 call :stage_firstboot_assets
+call :handle_step_result "Stage first-logon assets"
 
-call :log_info "Deployment completed successfully. The system will reboot now."
+if "!DEPLOYMENT_WARNINGS!"=="1" (
+    call :log_warning "Deployment completed with non-fatal warnings. Review %LOG% for details."
+) else (
+    call :log_info "Deployment completed successfully with no warnings."
+)
+call :log_info "The system will reboot now."
 call :persist_logs
 wpeutil reboot
 exit /b 0
@@ -132,7 +125,7 @@ if not exist "W:\Windows\Panther" md "W:\Windows\Panther" >> "%LOG%" 2>&1
 copy /y "!SCRIPT_DIR!unattend.xml" "W:\Windows\Panther\unattend.xml" >> "%LOG%" 2>&1
 if errorlevel 1 (
     call :log_warning "Failed to stage unattend.xml. Automatic OOBE bypass may fail."
-    exit /b 0
+    exit /b 2
 )
 call :log_info "unattend.xml staged successfully."
 exit /b 0
@@ -143,7 +136,7 @@ call :log_info "Setting WinRE path to W:\Windows\System32\Recovery"
 "W:\Windows\System32\reagentc.exe" /Setreimage /Path W:\Windows\System32\Recovery /Target W:\Windows >> "%LOG%" 2>&1
 if errorlevel 1 (
     call :log_warning "reagentc /Setreimage failed with exit code !errorlevel!. SetupComplete will attempt to enable WinRE later."
-    exit /b 0
+    exit /b 2
 )
 
 call :log_info "WinRE path configured successfully using W:\Windows\System32\reagentc.exe"
@@ -157,44 +150,45 @@ if not exist "W:\Windows\Setup\Scripts" md W:\Windows\Setup\Scripts >> "%LOG%" 2
 
 if not exist "!SCRIPT_DIR!firstboot.ps1" (
     call :log_warning "Missing firstboot.ps1 in WinPE runtime. Docker payload import will not be available."
-    exit /b 0
+    exit /b 2
 )
 
 if not exist "!SCRIPT_DIR!register-firstboot.ps1" (
     call :log_warning "Missing register-firstboot.ps1 in WinPE runtime. Docker payload import will not be available."
-    exit /b 0
+    exit /b 2
 )
 
 if not exist "!SCRIPT_DIR!SetupComplete.cmd" (
     call :log_warning "Missing SetupComplete.cmd in WinPE runtime. Docker payload import will not be available."
-    exit /b 0
+    exit /b 2
 )
 
 copy /y "!SCRIPT_DIR!firstboot.ps1" "W:\ProgramData\FirstBoot\firstboot.ps1" >> "%LOG%" 2>&1
 if errorlevel 1 (
     call :log_warning "Failed to stage firstboot.ps1 into the deployed OS."
-    exit /b 0
+    exit /b 2
 )
 
 copy /y "!SCRIPT_DIR!register-firstboot.ps1" "W:\ProgramData\FirstBoot\register-firstboot.ps1" >> "%LOG%" 2>&1
 if errorlevel 1 (
     call :log_warning "Failed to stage register-firstboot.ps1 into the deployed OS."
-    exit /b 0
+    exit /b 2
 )
 
 copy /y "!SCRIPT_DIR!SetupComplete.cmd" "W:\Windows\Setup\Scripts\SetupComplete.cmd" >> "%LOG%" 2>&1
 if errorlevel 1 (
     call :log_warning "Failed to stage SetupComplete.cmd into the deployed OS."
-    exit /b 0
+    exit /b 2
 )
 
 call :stage_docker_payloads
+if errorlevel 2 exit /b 2
 exit /b 0
 
 :stage_docker_payloads
 if not defined SOURCE_MEDIA_DRIVE (
     call :log_warning "Source media drive was not captured. Skipping payload staging."
-    exit /b 0
+    exit /b 2
 )
 
 set "DOCKER_PAYLOAD_SOURCE=!SOURCE_MEDIA_DRIVE!\payload\docker-images"
@@ -208,7 +202,7 @@ if not exist "W:\Payload\DockerImages" md W:\Payload\DockerImages >> "%LOG%" 2>&
 xcopy /E /I /Y "!DOCKER_PAYLOAD_SOURCE!\*" "W:\Payload\DockerImages\" >> "%LOG%" 2>&1
 if errorlevel 1 (
     call :log_warning "Failed to copy payload files into the deployed OS."
-    exit /b 0
+    exit /b 2
 )
 
 call :log_info "Payloads staged successfully."
@@ -233,16 +227,29 @@ set "WIM_PATH="
 set "SOURCE_MEDIA_DRIVE="
 set "MEDIA_LOG_DIR="
 set "MATCH_COUNT=0"
-for /L %%I in (1,1,25) do set "WIM_CANDIDATE_%%I="
+type nul > "%CANDIDATE_LIST%"
 
 rem WinPE drive letters are not stable across hardware, so scan a range instead of hard-coding one letter.
 for %%D in (C D E F G H I J K L M N O P Q R S T U V W X Y Z) do (
     if exist "%%D:\sources\install.wim" if exist "%%D:\sources\!SOURCE_TAG!" (
         set /a MATCH_COUNT+=1
-        set "WIM_CANDIDATE_!MATCH_COUNT!=%%D:\sources\install.wim"
+        >> "%CANDIDATE_LIST%" echo %%D:\sources\install.wim
         call :log_info "Found candidate !MATCH_COUNT!: %%D:\sources\install.wim"
     )
 )
+exit /b 0
+
+:handle_step_result
+if errorlevel 2 (
+    set "DEPLOYMENT_WARNINGS=1"
+    call :log_warning "%~1 completed with non-fatal warnings."
+    exit /b 0
+)
+if errorlevel 1 (
+    call :fail "%~1 failed unexpectedly."
+    exit /b 1
+)
+call :log_info "%~1 completed successfully."
 exit /b 0
 
 :log_info

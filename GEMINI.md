@@ -47,8 +47,8 @@ This project provides a WinPE-based Windows deployment pipeline built around a c
 ### `scripts\Generate-WinPEIso.ps1`
 
 - Packages the current `WinPEWorkDir\media` as an ISO.
-- Can optionally copy `install.wim` and payloads into `media\` before packaging.
-- Those copied artifacts remain in the work directory after the ISO is created.
+- Can optionally inject `install.wim` and payloads into a temporary staging copy before packaging.
+- The original work directory is left unchanged after ISO creation.
 
 ### `scripts\Export-CleanWinPEIso.ps1`
 
@@ -105,12 +105,12 @@ Main responsibilities:
 - If Docker becomes ready, it executes:
   - `load_images.bat`
   - `install_appstore.bat`
-- It then creates `done.tag` and removes the Run entry.
+- It creates `done.tag` and removes the Run entry only when all detected payload scripts return exit code `0`.
 
 Important limitation:
 
-- Retry behavior only applies while Docker is unavailable or not ready.
-- Failures inside payload batch files are logged, but they do not block `done.tag` creation.
+- Retry behavior applies while Docker is unavailable, not ready, or a payload batch file returns non-zero.
+- Payload execution still only recognizes `load_images.bat` and `install_appstore.bat`.
 
 ## Operational notes
 

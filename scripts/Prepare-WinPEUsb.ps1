@@ -39,98 +39,8 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-# Required because disk partitioning and formatting are privileged operations.
-function Test-IsAdministrator {
-    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
-    $principal = [Security.Principal.WindowsPrincipal]::new($identity)
-    return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-}
-
-# Centralized wrapper for external commands so native tool failures become terminating errors.
-function Invoke-ExternalCommand {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$FilePath,
-
-        [Parameter()]
-        [string[]]$Arguments = @()
-    )
-
-    Write-Host ('>> {0} {1}' -f $FilePath, ($Arguments -join ' ')) -ForegroundColor Cyan
-    & $FilePath @Arguments
-
-    if ($LASTEXITCODE -ne 0) {
-        throw ("Command failed with exit code {0}: {1} {2}" -f $LASTEXITCODE, $FilePath, ($Arguments -join ' '))
-    }
-}
-
-# Matches the environment that ADK helper batch files expect even when launched from normal PowerShell.
-function Set-AdkEnvironment {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$AdkRootPath,
-
-        [Parameter(Mandatory = $true)]
-        [string]$TargetArchitecture
-    )
-
-    $deploymentToolsRoot = Join-Path $AdkRootPath 'Deployment Tools'
-    $architectureToolsRoot = Join-Path $deploymentToolsRoot $TargetArchitecture
-    $winPeRoot = Join-Path $AdkRootPath 'Windows Preinstallation Environment'
-
-    $requiredPaths = @(
-        $deploymentToolsRoot,
-        $architectureToolsRoot,
-        $winPeRoot,
-        (Join-Path $architectureToolsRoot 'DISM'),
-        (Join-Path $architectureToolsRoot 'BCDBoot'),
-        (Join-Path $architectureToolsRoot 'Oscdimg')
-    )
-
-    foreach ($path in $requiredPaths) {
-        if (-not (Test-Path -LiteralPath $path)) {
-            throw "Required ADK path was not found: $path"
-        }
-    }
-
-    $env:DandIRoot = $deploymentToolsRoot
-    $env:WinPERoot = $winPeRoot
-    $env:WinPERootNoArch = $winPeRoot
-    $env:WindowsSetupRootNoArch = Join-Path $AdkRootPath 'Windows Setup'
-    $env:USMTRootNoArch = Join-Path $AdkRootPath 'User State Migration Tool'
-    $env:DISMRoot = Join-Path $architectureToolsRoot 'DISM'
-    $env:BCDBootRoot = Join-Path $architectureToolsRoot 'BCDBoot'
-    $imagingRoot = Join-Path $architectureToolsRoot 'Imaging'
-    $env:ImagingRoot = if (Test-Path -LiteralPath $imagingRoot) { $imagingRoot } else { $null }
-    $env:OSCDImgRoot = Join-Path $architectureToolsRoot 'Oscdimg'
-    $wdsmcastRoot = Join-Path $architectureToolsRoot 'Wdsmcast'
-    $env:WdsmcastRoot = if (Test-Path -LiteralPath $wdsmcastRoot) { $wdsmcastRoot } else { $null }
-
-    $adkToolPaths = @(
-        $env:DISMRoot,
-        $env:ImagingRoot,
-        $env:BCDBootRoot,
-        $env:OSCDImgRoot,
-        $env:WdsmcastRoot,
-        $env:WinPERoot
-    ) | Where-Object { $_ }
-
-    $existingPathEntries = @()
-    if ($env:PATH) {
-        $existingPathEntries = $env:PATH -split ';' | Where-Object { $_ }
-    }
-
-    $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    $combinedPathEntries = [System.Collections.Generic.List[string]]::new()
-
-    foreach ($pathEntry in @($adkToolPaths + $existingPathEntries)) {
-        if ($pathEntry -and $seen.Add($pathEntry)) {
-            [void]$combinedPathEntries.Add($pathEntry)
-        }
-    }
-
-    $env:PATH = $combinedPathEntries -join ';'
-}
+$helpersPath = Join-Path $PSScriptRoot 'Common-WinPEHelpers.ps1'
+. $helpersPath
 
 if (-not (Test-IsAdministrator)) {
     throw 'Run this script from an elevated PowerShell session.'
@@ -153,8 +63,13 @@ if (-not (Test-Path -LiteralPath $InstallWimPath)) {
     throw "install.wim was not found at $InstallWimPath"
 }
 
-if ($DockerImagesDirectory -and -not (Test-Path -LiteralPath $DockerImagesDirectory)) {
-    throw "The Docker images directory was not found at $DockerImagesDirectory"
+$resolvedDockerImagesDirectory = $null
+if ($DockerImagesDirectory) {
+    if (-not (Test-Path -LiteralPath $DockerImagesDirectory)) {
+        throw "The Docker images directory was not found at $DockerImagesDirectory"
+    }
+
+    $resolvedDockerImagesDirectory = (Get-Item -LiteralPath $DockerImagesDirectory).FullName
 }
 
 $installWim = Get-Item -LiteralPath $InstallWimPath
@@ -244,26 +159,18 @@ Copy-Item -LiteralPath $InstallWimPath -Destination $destinationWimPath -Force
 
 $tagPath = Join-Path $sourceDir 'winpe-autodeploy.tag'
 # The marker file makes runtime source selection safer than "first install.wim found wins".
-Set-Content -LiteralPath $tagPath -Value @(
-    'WinPE Auto Deploy USB source'
-    ('Created={0}' -f (Get-Date -Format s))
-    ('SourceWim={0}' -f $InstallWimPath)
-) -Encoding ASCII
+Write-WinPEAutoDeployTag -TagPath $tagPath -SourceLabel 'WinPE Auto Deploy USB source' -SourceWimPath $InstallWimPath
 
-if ($DockerImagesDirectory) {
+if ($resolvedDockerImagesDirectory) {
     $dockerPayloadDir = "{0}:\payload\docker-images" -f $imageDriveLetter
-    if (-not (Test-Path -LiteralPath $dockerPayloadDir)) {
-        New-Item -ItemType Directory -Path $dockerPayloadDir -Force | Out-Null
-    }
-
     Write-Host "Copying payload files to $dockerPayloadDir..." -ForegroundColor Cyan
-    Copy-Item -Path "$DockerImagesDirectory\*" -Destination $dockerPayloadDir -Recurse -Force
+    Copy-DockerPayloadTree -SourceDirectory $resolvedDockerImagesDirectory -DestinationDirectory $dockerPayloadDir
 }
 Write-Host ''
 Write-Host ('USB preparation completed.' ) -ForegroundColor Green
 Write-Host ("Boot partition : {0}:" -f $bootDriveLetter) -ForegroundColor Green
 Write-Host ("Image partition: {0}:\sources\install.wim" -f $imageDriveLetter) -ForegroundColor Green
-if ($DockerImagesDirectory) {
+if ($resolvedDockerImagesDirectory) {
     Write-Host ("Docker payload: {0}:\payload\docker-images" -f $imageDriveLetter) -ForegroundColor Green
 }
 Write-Host 'Boot the target machine from this USB device. WinPE will scan mounted volumes for \sources\install.wim and start deployment automatically.' -ForegroundColor Green

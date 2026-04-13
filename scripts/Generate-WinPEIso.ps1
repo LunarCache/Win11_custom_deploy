@@ -30,91 +30,8 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-# Keeps the behavior of external ADK tools consistent and fail-fast.
-function Invoke-ExternalCommand {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$FilePath,
-
-        [Parameter()]
-        [string[]]$Arguments = @()
-    )
-
-    Write-Host ('>> {0} {1}' -f $FilePath, ($Arguments -join ' ')) -ForegroundColor Cyan
-    & $FilePath @Arguments
-
-    if ($LASTEXITCODE -ne 0) {
-        throw ("Command failed with exit code {0}: {1} {2}" -f $LASTEXITCODE, $FilePath, ($Arguments -join ' '))
-    }
-}
-
-# Rebuilds the minimal ADK environment so MakeWinPEMedia.cmd can find oscdimg and related tools.
-function Set-AdkEnvironment {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$AdkRootPath,
-
-        [Parameter(Mandatory = $true)]
-        [string]$TargetArchitecture
-    )
-
-    $deploymentToolsRoot = Join-Path $AdkRootPath 'Deployment Tools'
-    $architectureToolsRoot = Join-Path $deploymentToolsRoot $TargetArchitecture
-    $winPeRoot = Join-Path $AdkRootPath 'Windows Preinstallation Environment'
-
-    $requiredPaths = @(
-        $deploymentToolsRoot,
-        $architectureToolsRoot,
-        $winPeRoot,
-        (Join-Path $architectureToolsRoot 'DISM'),
-        (Join-Path $architectureToolsRoot 'BCDBoot'),
-        (Join-Path $architectureToolsRoot 'Oscdimg')
-    )
-
-    foreach ($path in $requiredPaths) {
-        if (-not (Test-Path -LiteralPath $path)) {
-            throw "Required ADK path was not found: $path"
-        }
-    }
-
-    $env:DandIRoot = $deploymentToolsRoot
-    $env:WinPERoot = $winPeRoot
-    $env:WinPERootNoArch = $winPeRoot
-    $env:WindowsSetupRootNoArch = Join-Path $AdkRootPath 'Windows Setup'
-    $env:USMTRootNoArch = Join-Path $AdkRootPath 'User State Migration Tool'
-    $env:DISMRoot = Join-Path $architectureToolsRoot 'DISM'
-    $env:BCDBootRoot = Join-Path $architectureToolsRoot 'BCDBoot'
-    $imagingRoot = Join-Path $architectureToolsRoot 'Imaging'
-    $env:ImagingRoot = if (Test-Path -LiteralPath $imagingRoot) { $imagingRoot } else { $null }
-    $env:OSCDImgRoot = Join-Path $architectureToolsRoot 'Oscdimg'
-    $wdsmcastRoot = Join-Path $architectureToolsRoot 'Wdsmcast'
-    $env:WdsmcastRoot = if (Test-Path -LiteralPath $wdsmcastRoot) { $wdsmcastRoot } else { $null }
-
-    $adkToolPaths = @(
-        $env:DISMRoot,
-        $env:ImagingRoot,
-        $env:BCDBootRoot,
-        $env:OSCDImgRoot,
-        $env:WdsmcastRoot,
-        $env:WinPERoot
-    ) | Where-Object { $_ }
-
-    $existingPathEntries = @()
-    if ($env:PATH) {
-        $existingPathEntries = $env:PATH -split ';' | Where-Object { $_ }
-    }
-
-    $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    $combinedPathEntries = [System.Collections.Generic.List[string]]::new()
-
-    foreach ($pathEntry in @($adkToolPaths + $existingPathEntries)) {
-        if ($pathEntry -and $seen.Add($pathEntry)) {
-            [void]$combinedPathEntries.Add($pathEntry)
-        }
-    }
-
-    $env:PATH = $combinedPathEntries -join ';'
-}
+$helpersPath = Join-Path $PSScriptRoot 'Common-WinPEHelpers.ps1'
+. $helpersPath
 
 Set-AdkEnvironment -AdkRootPath $AdkRoot -TargetArchitecture $Architecture
 
@@ -148,49 +65,69 @@ if (Test-Path -LiteralPath $IsoPath) {
     Remove-Item -LiteralPath $IsoPath -Force
 }
 
-if ($InstallWimPath) {
-    if (-not (Test-Path -LiteralPath $InstallWimPath)) {
-        throw "install.wim was not found at $InstallWimPath"
-    }
-
-    $sourceDir = Join-Path $mediaDir 'sources'
-    if (-not (Test-Path -LiteralPath $sourceDir)) {
-        New-Item -ItemType Directory -Path $sourceDir -Force | Out-Null
-    }
-
-    $destinationWimPath = Join-Path $sourceDir 'install.wim'
-    Write-Host "Copying install.wim to $destinationWimPath..." -ForegroundColor Cyan
-    Copy-Item -LiteralPath $InstallWimPath -Destination $destinationWimPath -Force
-
-    $tagPath = Join-Path $sourceDir 'winpe-autodeploy.tag'
-    Set-Content -LiteralPath $tagPath -Value @(
-        'WinPE Auto Deploy Standalone ISO source'
-        ('Created={0}' -f (Get-Date -Format s))
-        ('SourceWim={0}' -f $InstallWimPath)
-    ) -Encoding ASCII
-}
-
-if ($DockerImagesDirectory) {
-    if (-not (Test-Path -LiteralPath $DockerImagesDirectory)) {
-        throw "The Docker images directory was not found at $DockerImagesDirectory"
-    }
-
-    $dockerPayloadDir = Join-Path $mediaDir 'payload\docker-images'
-    if (-not (Test-Path -LiteralPath $dockerPayloadDir)) {
-        New-Item -ItemType Directory -Path $dockerPayloadDir -Force | Out-Null
-    }
-
-    Write-Host "Copying payload files to $dockerPayloadDir..." -ForegroundColor Cyan
-    Copy-Item -Path "$DockerImagesDirectory\*" -Destination $dockerPayloadDir -Recurse -Force
-}
+$stagingRoot = $null
+$packagingWorkDir = $WinPEWorkDir
 
 # Package the already-customized WinPE media directory as a bootable ISO.
-Write-Host "Packaging ISO..." -ForegroundColor Cyan
-Invoke-ExternalCommand -FilePath $makeWinPEMediaPath -Arguments @(
-    '/ISO',
-    $WinPEWorkDir,
-    $IsoPath
-)
+try {
+    if ($InstallWimPath -or $DockerImagesDirectory) {
+        $resolvedInstallWimPath = $null
+        $resolvedDockerImagesDirectory = $null
+
+        if ($InstallWimPath) {
+            if (-not (Test-Path -LiteralPath $InstallWimPath)) {
+                throw "install.wim was not found at $InstallWimPath"
+            }
+
+            $resolvedInstallWimPath = (Get-Item -LiteralPath $InstallWimPath).FullName
+        }
+
+        if ($DockerImagesDirectory) {
+            if (-not (Test-Path -LiteralPath $DockerImagesDirectory)) {
+                throw "The Docker images directory was not found at $DockerImagesDirectory"
+            }
+
+            $resolvedDockerImagesDirectory = (Get-Item -LiteralPath $DockerImagesDirectory).FullName
+        }
+
+        $stagingRoot = New-TemporaryDirectory -Prefix 'WinPEIsoStage'
+        $packagingWorkDir = Join-Path $stagingRoot (Split-Path -Leaf $WinPEWorkDir)
+        Write-Host "Creating temporary ISO staging tree at $packagingWorkDir..." -ForegroundColor Cyan
+        Copy-Item -LiteralPath $WinPEWorkDir -Destination $packagingWorkDir -Recurse
+
+        $stagingMediaDir = Join-Path $packagingWorkDir 'media'
+
+        if ($resolvedInstallWimPath) {
+            $sourceDir = Join-Path $stagingMediaDir 'sources'
+            Ensure-Directory -Path $sourceDir
+
+            $destinationWimPath = Join-Path $sourceDir 'install.wim'
+            Write-Host "Copying install.wim to $destinationWimPath..." -ForegroundColor Cyan
+            Copy-Item -LiteralPath $resolvedInstallWimPath -Destination $destinationWimPath -Force
+
+            $tagPath = Join-Path $sourceDir 'winpe-autodeploy.tag'
+            Write-WinPEAutoDeployTag -TagPath $tagPath -SourceLabel 'WinPE Auto Deploy Standalone ISO source' -SourceWimPath $resolvedInstallWimPath
+        }
+
+        if ($resolvedDockerImagesDirectory) {
+            $dockerPayloadDir = Join-Path $stagingMediaDir 'payload\docker-images'
+            Write-Host "Copying payload files to $dockerPayloadDir..." -ForegroundColor Cyan
+            Copy-DockerPayloadTree -SourceDirectory $resolvedDockerImagesDirectory -DestinationDirectory $dockerPayloadDir
+        }
+    }
+
+    Write-Host "Packaging ISO..." -ForegroundColor Cyan
+    Invoke-ExternalCommand -FilePath $makeWinPEMediaPath -Arguments @(
+        '/ISO',
+        $packagingWorkDir,
+        $IsoPath
+    )
+}
+finally {
+    if ($stagingRoot -and (Test-Path -LiteralPath $stagingRoot)) {
+        Remove-Item -LiteralPath $stagingRoot -Recurse -Force
+    }
+}
 
 Write-Host ''
 Write-Host "WinPE ISO created at $IsoPath" -ForegroundColor Green

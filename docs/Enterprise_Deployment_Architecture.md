@@ -90,14 +90,14 @@
 实际行为：
 
 - 默认输出 ISO 到 `WinPEWorkDir` 下，名称为 `<工作目录名>.iso`
-- 若传入 `-InstallWimPath`，会先复制到 `media\sources\install.wim`，并写入 `winpe-autodeploy.tag`
-- 若传入 `-DockerImagesDirectory`，会先复制到 `media\payload\docker-images`
+- 若传入 `-InstallWimPath` 或 `-DockerImagesDirectory`，会先复制整个工作目录到临时 staging 目录
+- 再向临时目录注入 `media\sources\install.wim`、`winpe-autodeploy.tag` 和 `media\payload\docker-images`
 - 然后调用 `MakeWinPEMedia.cmd /ISO`
 
 实现注意点：
 
-- 该脚本会修改工作目录下的 `media\` 内容。
-- 复制进去的 `install.wim` 和 payload 不会在 ISO 打包后自动清理。
+- 原始工作目录不会被 ISO 打包过程污染。
+- 临时 staging 目录在打包结束后会被清理。
 
 ### 2.4 `Export-CleanWinPEIso.ps1`
 
@@ -132,7 +132,7 @@
    - `\sources\install.wim`
    - `\sources\winpe-autodeploy.tag`
 4. 如果匹配数为 0 或大于 1，则立即停止，且不会修改目标盘
-5. 将 `diskpart-uefi.txt` 按当前 `TARGET_DISK` 渲染为运行时版本
+5. 直接使用构建阶段已渲染完成的 `diskpart-uefi.txt`
 6. 调用 `diskpart /s` 清空并重建目标盘
 7. 校验 `W:` 和 `S:` 是否生成成功
 8. 执行：
@@ -259,8 +259,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\ProgramData\FirstBoot
 8. Docker 就绪后，按存在性执行：
    - `load_images.bat`
    - `install_appstore.bat`
-9. 创建 `done.tag`
-10. 删除 Run 注册
+9. 仅当所有已发现的 payload 脚本都返回 `0` 时才创建 `done.tag`
+10. 仅在上述成功条件满足时删除 Run 注册
 
 ### 5.4 真实的重试语义
 
@@ -268,10 +268,10 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\ProgramData\FirstBoot
 
 - 如果 `docker.exe` 缺失，脚本 `exit 1`，Run 项保留，下次登录重试
 - 如果 Docker 始终未就绪，脚本 `exit 1`，Run 项保留，下次登录重试
-- 如果 `load_images.bat` 或 `install_appstore.bat` 执行异常，错误会被记录，但脚本仍会继续走到末尾
-- 到达末尾后会创建 `done.tag` 并移除 Run 项
+- 如果 `load_images.bat` 或 `install_appstore.bat` 返回非 0 或执行异常，错误会被记录，Run 项保留，下次登录重试
+- 只有当 Docker 与 payload 全部完成成功时，脚本才会创建 `done.tag` 并移除 Run 项
 
-因此，当前实现不是“业务脚本失败也会自动重试”的设计，只是“Docker 前置条件不满足时可重试”。
+因此，当前实现已经覆盖两类自动重试：Docker 前置条件失败，以及 payload 脚本失败。
 
 ## 6. 日志与可观测性
 
@@ -307,8 +307,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\ProgramData\FirstBoot
 1. 目标磁盘由构建阶段固化，运行时不会动态选择。
 2. WinPE 只接受“恰好一个”合法镜像源，多源环境下会直接拒绝。
 3. `unattend.xml` 当前创建的是空密码本地管理员账户，这在受控实验环境以外通常需要额外安全评估。
-4. `Generate-WinPEIso.ps1` 会污染现有工作目录中的 `media\` 内容。
-5. 首启阶段只对 Docker 未就绪场景保留自动重试，不对业务脚本失败做重试。
+4. payload 自动执行仍只识别固定文件名 `load_images.bat` 与 `install_appstore.bat`。
+5. `Generate-WinPEIso.ps1` 通过临时 staging 打包，额外增加了一次目录复制开销。
 
 ## 8. 建议的阅读顺序
 

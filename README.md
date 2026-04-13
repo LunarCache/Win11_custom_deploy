@@ -34,7 +34,7 @@ This repository builds a reusable UEFI-only WinPE deployment environment for app
   - Copies `install.wim`, `winpe-autodeploy.tag`, and optional payload files to the NTFS data partition.
 - `scripts\Generate-WinPEIso.ps1`
   - Packages an existing customized work directory as an ISO.
-  - Can optionally bundle `install.wim` and payload files into `media\` before packaging.
+  - Can optionally bundle `install.wim` and payload files into a temporary staging copy before packaging.
 - `scripts\Export-CleanWinPEIso.ps1`
   - Produces a stock WinPE ISO with no project-specific automation injected.
   - Intended for maintenance or image-capture scenarios.
@@ -55,7 +55,7 @@ This repository builds a reusable UEFI-only WinPE deployment environment for app
   - Runs on user logon from `HKLM\...\Run`.
   - Ensures Docker is present and ready.
   - Executes `load_images.bat` and `install_appstore.bat` if they exist in `C:\Payload\DockerImages`.
-  - Removes the Run registration only after the script reaches the end successfully.
+  - Removes the Run registration only after Docker is ready and all detected payload scripts return exit code `0`.
 
 ## Requirements
 
@@ -139,8 +139,8 @@ Bundling `install.wim` and payloads into the ISO:
 Important behavior:
 
 - `Generate-WinPEIso.ps1` packages the current contents of `WinPEWorkDir\media`.
-- If `-InstallWimPath` or `-DockerImagesDirectory` is used, the script copies those files into `media\` before ISO creation.
-- Those copied files remain in the work directory after the ISO is generated.
+- If `-InstallWimPath` or `-DockerImagesDirectory` is used, the script first creates a temporary staging copy of the work directory, injects those files there, and packages from that staging tree.
+- The original `WinPEWorkDir\media` contents are left unchanged.
 
 ### 4. Export a plain WinPE ISO
 
@@ -182,12 +182,12 @@ After Windows boots:
   - If Docker becomes ready, it executes:
     - `C:\Payload\DockerImages\load_images.bat` when present
     - `C:\Payload\DockerImages\install_appstore.bat` when present
-  - At the end of the script, it creates `C:\ProgramData\FirstBoot\done.tag` and removes the Run entry.
+  - It creates `C:\ProgramData\FirstBoot\done.tag` and removes the Run entry only if all detected payload scripts succeed.
 
 Important limitation:
 
-- Retry behavior only covers the case where Docker is missing or not ready.
-- Failures inside `load_images.bat` or `install_appstore.bat` are logged, but they do not currently prevent `done.tag` creation or Run-entry cleanup.
+- Retry behavior covers both Docker readiness failures and payload script failures.
+- Payload scripts are still discovered by fixed filenames only: `load_images.bat` and `install_appstore.bat`.
 
 ## Payload layout
 
