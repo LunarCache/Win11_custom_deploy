@@ -123,9 +123,8 @@ call :stage_unattend_xml
 call :configure_winre
 call :stage_firstboot_assets
 
-call :log_info "Deployment completed successfully. The system will reboot in 5 seconds."
+call :log_info "Deployment completed successfully. The system will reboot now."
 call :persist_logs
-timeout /t 5 >nul
 wpeutil reboot
 exit /b 0
 
