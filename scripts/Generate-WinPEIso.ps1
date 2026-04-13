@@ -168,6 +168,20 @@ if ($InstallWimPath) {
     ) -Encoding ASCII
 }
 
+if ($DockerImagesDirectory) {
+    if (-not (Test-Path -LiteralPath $DockerImagesDirectory)) {
+        throw "The Docker images directory was not found at $DockerImagesDirectory"
+    }
+
+    $dockerPayloadDir = Join-Path $mediaDir 'payload\docker-images'
+    if (-not (Test-Path -LiteralPath $dockerPayloadDir)) {
+        New-Item -ItemType Directory -Path $dockerPayloadDir -Force | Out-Null
+    }
+
+    Write-Host "Copying payload files to $dockerPayloadDir..." -ForegroundColor Cyan
+    Copy-Item -Path "$DockerImagesDirectory\*" -Destination $dockerPayloadDir -Recurse -Force
+}
+
 # Package the already-customized WinPE media directory as a bootable ISO.
 Write-Host "Packaging ISO..." -ForegroundColor Cyan
 Invoke-ExternalCommand -FilePath $makeWinPEMediaPath -Arguments @(

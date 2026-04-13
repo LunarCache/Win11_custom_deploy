@@ -252,14 +252,13 @@ Set-Content -LiteralPath $tagPath -Value @(
 
 if ($DockerImagesDirectory) {
     $dockerPayloadDir = "{0}:\payload\docker-images" -f $imageDriveLetter
-    New-Item -ItemType Directory -Path $dockerPayloadDir -Force | Out-Null
-
-    Write-Host "Copying Docker image tar files to $dockerPayloadDir" -ForegroundColor Cyan
-    Get-ChildItem -LiteralPath $DockerImagesDirectory -Filter *.tar -File | ForEach-Object {
-        Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $dockerPayloadDir $_.Name) -Force
+    if (-not (Test-Path -LiteralPath $dockerPayloadDir)) {
+        New-Item -ItemType Directory -Path $dockerPayloadDir -Force | Out-Null
     }
-}
 
+    Write-Host "Copying payload files to $dockerPayloadDir..." -ForegroundColor Cyan
+    Copy-Item -Path "$DockerImagesDirectory\*" -Destination $dockerPayloadDir -Recurse -Force
+}
 Write-Host ''
 Write-Host ('USB preparation completed.' ) -ForegroundColor Green
 Write-Host ("Boot partition : {0}:" -f $bootDriveLetter) -ForegroundColor Green

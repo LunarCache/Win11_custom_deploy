@@ -22,7 +22,7 @@ This project provides a reusable automation framework for UEFI-only WinPE deploy
 
 ### 3. Post-Deployment (`templates/`)
 - `SetupComplete.cmd`: Runs automatically on first boot. Enables WinRE and registers `firstboot.ps1`.
-- `firstboot.ps1`: Imports Docker images from `C:\Payload\DockerImages` and cleans up the first-logon registration.
+- `firstboot.ps1`: Ensures Docker is running (explicitly launching Docker Desktop if necessary), imports Docker images from `C:\Payload\DockerImages`, and automatically executes `install_appstore.bat` if present before cleaning up.
 
 ## Building and Running
 

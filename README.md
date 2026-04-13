@@ -58,8 +58,9 @@ To generate a standalone ISO for VM testing (bundling the install.wim directly i
 - The deployment also writes `BypassNRO=1` into the offline SOFTWARE hive so Windows OOBE can skip the network requirement on first boot.
 - `X:\AutoDeploy.log` now uses explicit `[INFO]`, `[WARNING]`, and `[ERROR]` markers to make postmortem review easier.
 - Before WinPE reboots or stops on an error, it also tries to preserve the current log to the deployed OS at `C:\Windows\Temp\AutoDeploy.log` and to the deployment media at `\DeployLogs\AutoDeploy.log` when those destinations are available.
-- If `\payload\docker-images` exists on the deployment media, WinPE copies it into `C:\Payload\DockerImages` inside the deployed OS.
-- `SetupComplete.cmd` first runs `reagentc /enable`, then registers a persistent HKLM Run entry, and `firstboot.ps1` removes that entry only after all Docker tar files import successfully. This allows automatic retry on later logons if Docker is not ready on the first attempt.
+- If `\payload\docker-images` exists on the deployment media, WinPE copies it into `C:\Payload\DockerImages` inside the deployed OS. This directory now supports generic payloads; all files and subdirectories are copied recursively.
+- `SetupComplete.cmd` first runs `reagentc /enable`, then registers a persistent HKLM Run entry, and `firstboot.ps1` removes that entry only after all Docker tar files import successfully and the optional `install_appstore.bat` setup script finishes. This allows automatic retry on later logons if Docker is not ready on the first attempt.
+- `firstboot.ps1` now explicitly attempts to start the Docker Desktop GUI if it's found but not running, ensuring that the WSL2 backend initializes properly during the first boot.
 - To change the default target disk or WIM index, rebuild the WinPE work directory with different `-TargetDisk` or `-WimIndex` values.
 - `Generate-WinPEIso.ps1` creates a bootable WinPE ISO from the existing work directory. Use it for Hyper-V Gen 2 or other UEFI VM tests.
 

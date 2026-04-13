@@ -53,6 +53,16 @@ function Ensure-DockerReady {
         [string]$DockerExe
     )
 
+    # If Docker Desktop is installed, ensure the GUI is running to trigger daemon initialization.
+    $dockerDesktopPath = 'C:\Program Files\Docker\Docker\Docker Desktop.exe'
+    if (Test-Path -LiteralPath $dockerDesktopPath) {
+        $desktopProcess = Get-Process -Name 'Docker Desktop' -ErrorAction SilentlyContinue
+        if (-not $desktopProcess) {
+            Write-Log -Level 'INFO' -Message 'Starting Docker Desktop GUI...'
+            Start-Process -FilePath $dockerDesktopPath
+        }
+    }
+
     foreach ($serviceName in @('com.docker.service', 'docker')) {
         try {
             $service = Get-Service -Name $serviceName -ErrorAction Stop
@@ -129,6 +139,19 @@ foreach ($tarFile in $tarFiles) {
     if ($exitCode -ne 0) {
         Write-Log -Level 'ERROR' -Message ("Docker import failed for {0}. The import will retry on the next logon." -f $tarFile.Name)
         exit 1
+    }
+}
+
+$appstoreScript = Join-Path $dockerPayloadDir 'install_appstore.bat'
+if (Test-Path -LiteralPath $appstoreScript) {
+    Write-Log -Level 'INFO' -Message ("Executing appstore setup script: {0}" -f $appstoreScript)
+    try {
+        # Start the batch script in a visible window so the user can see progress and the final 'pause'.
+        $process = Start-Process -FilePath $appstoreScript -Wait -PassThru
+        Write-Log -Level 'INFO' -Message ("Appstore setup script finished with exit code {0}." -f $process.ExitCode)
+    }
+    catch {
+        Write-Log -Level 'ERROR' -Message ("Failed to execute appstore setup script: {0}" -f $_.Exception.Message)
     }
 }
 
