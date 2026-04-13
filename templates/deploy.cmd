@@ -208,25 +208,31 @@ exit /b 0
 
 :stage_docker_payloads
 if not defined SOURCE_MEDIA_DRIVE (
-    call :log_warning "Source media drive was not captured. Skipping Docker payload staging."
+    call :log_warning "Source media drive was not captured. Skipping payload staging."
     exit /b 0
 )
 
-set "DOCKER_PAYLOAD_SOURCE=!SOURCE_MEDIA_DRIVE!\payload\docker-images"
-if not exist "!DOCKER_PAYLOAD_SOURCE!" (
-    call :log_info "No Docker payload directory was found on the deployment media."
+set "DOCKER_PAYLOAD_SOURCE="
+if exist "!SOURCE_MEDIA_DRIVE!\payload\docker-images" (
+    set "DOCKER_PAYLOAD_SOURCE=!SOURCE_MEDIA_DRIVE!\payload\docker-images"
+) else if exist "!SOURCE_MEDIA_DRIVE!\sources\win11-install" (
+    set "DOCKER_PAYLOAD_SOURCE=!SOURCE_MEDIA_DRIVE!\sources\win11-install"
+)
+
+if not defined DOCKER_PAYLOAD_SOURCE (
+    call :log_info "No payload directory found on deployment media (checked \payload\docker-images and \sources\win11-install)."
     exit /b 0
 )
 
-call :log_info "Copying Docker payloads from !DOCKER_PAYLOAD_SOURCE! to W:\Payload\DockerImages"
+call :log_info "Copying payloads from !DOCKER_PAYLOAD_SOURCE! to W:\Payload\DockerImages"
 if not exist "W:\Payload\DockerImages" md W:\Payload\DockerImages >> "%LOG%" 2>&1
-xcopy /E /I /Y "!DOCKER_PAYLOAD_SOURCE!" "W:\Payload\DockerImages\" >> "%LOG%" 2>&1
+xcopy /E /I /Y "!DOCKER_PAYLOAD_SOURCE!\*" "W:\Payload\DockerImages\" >> "%LOG%" 2>&1
 if errorlevel 1 (
-    call :log_warning "Failed to copy Docker payload files into the deployed OS."
+    call :log_warning "Failed to copy payload files into the deployed OS."
     exit /b 0
 )
 
-call :log_info "Docker payloads staged successfully."
+call :log_info "Payloads staged successfully."
 exit /b 0
 
 :persist_logs
