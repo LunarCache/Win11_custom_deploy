@@ -20,6 +20,8 @@ param(
 
     [string]$InstallWimPath,
 
+    [string]$DockerImagesDirectory,
+
     [string]$AdkRoot = 'C:\Program Files (x86)\Windows Kits\10\Assessment and Deployment Kit',
 
     [switch]$Force
