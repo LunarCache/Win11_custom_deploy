@@ -119,6 +119,7 @@ if errorlevel 1 (
 )
 
 call :configure_oobe_skip_network
+call :stage_unattend_xml
 call :configure_winre
 call :stage_firstboot_assets
 
@@ -126,6 +127,17 @@ call :log_info "Deployment completed successfully. The system will reboot in 5 s
 call :persist_logs
 timeout /t 5 >nul
 wpeutil reboot
+exit /b 0
+
+:stage_unattend_xml
+call :log_info "Staging unattend.xml to automate OOBE and auto-login"
+if not exist "W:\Windows\Panther" md "W:\Windows\Panther" >> "%LOG%" 2>&1
+copy /y "!SCRIPT_DIR!unattend.xml" "W:\Windows\Panther\unattend.xml" >> "%LOG%" 2>&1
+if errorlevel 1 (
+    call :log_warning "Failed to stage unattend.xml. Automatic OOBE bypass may fail."
+    exit /b 0
+)
+call :log_info "unattend.xml staged successfully."
 exit /b 0
 
 :configure_oobe_skip_network

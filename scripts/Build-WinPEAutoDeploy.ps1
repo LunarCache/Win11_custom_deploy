@@ -248,6 +248,7 @@ try {
     Write-RenderedTemplate -TemplatePath (Join-Path $templatesDir 'firstboot.ps1') -DestinationPath (Join-Path $system32Dir 'firstboot.ps1')
     Write-RenderedTemplate -TemplatePath (Join-Path $templatesDir 'register-firstboot.ps1') -DestinationPath (Join-Path $system32Dir 'register-firstboot.ps1')
     Write-RenderedTemplate -TemplatePath (Join-Path $templatesDir 'SetupComplete.cmd') -DestinationPath (Join-Path $system32Dir 'SetupComplete.cmd')
+    Write-RenderedTemplate -TemplatePath (Join-Path $templatesDir 'unattend.xml') -DestinationPath (Join-Path $system32Dir 'unattend.xml')
 
     $commitChanges = $true
 }

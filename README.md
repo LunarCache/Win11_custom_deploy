@@ -55,7 +55,8 @@ To generate a standalone ISO for VM testing (bundling the install.wim directly i
 - The prepared USB data partition also gets a `\sources\winpe-autodeploy.tag` marker. The WinPE deploy script requires both files, which prevents it from accidentally picking up an unrelated `install.wim` on an internal disk.
 - The Recovery partition is created with its final GPT type and hidden attributes directly during `diskpart` execution.
 - The deployment sets the WinRE path to `W:\Windows\System32\Recovery` during WinPE. To maintain a minimal WinPE footprint and ensure high compatibility, `deploy.cmd` utilizes the `reagentc.exe` tool directly from the newly applied Windows OS partition (`W:\Windows\System32\reagentc.exe`). `SetupComplete.cmd` then runs `reagentc /enable` inside the deployed OS to finalize the activation.
-- The deployment also writes `BypassNRO=1` into the offline SOFTWARE hive so Windows OOBE can skip the network requirement on first boot.
+- `deploy.cmd` stages a custom `unattend.xml` file to `W:\Windows\Panther\unattend.xml` which forces Windows to completely bypass all OOBE setup screens and automatically log directly into the desktop as a local `Admin` user.
+- The deployment also writes `BypassNRO=1` into the offline SOFTWARE hive. (This acts as a fallback for skipping network requirements if `unattend.xml` is modified by the user).
 - `X:\AutoDeploy.log` now uses explicit `[INFO]`, `[WARNING]`, and `[ERROR]` markers to make postmortem review easier.
 - Before WinPE reboots or stops on an error, it also tries to preserve the current log to the deployed OS at `C:\Windows\Temp\AutoDeploy.log` and to the deployment media at `\DeployLogs\AutoDeploy.log` when those destinations are available.
 - If `\payload\docker-images` exists on the deployment media, WinPE copies it into `C:\Payload\DockerImages` inside the deployed OS. This directory now supports generic payloads; all files and subdirectories are copied recursively.

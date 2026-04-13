@@ -21,6 +21,7 @@ This project provides a reusable automation framework for UEFI-only WinPE deploy
 - `diskpart-uefi.txt`: Template for GPT partitioning (EFI, MSR, Windows, Recovery).
 
 ### 3. Post-Deployment (`templates/`)
+- `unattend.xml`: Configuration file injected into the deployed OS to completely skip OOBE screens and automatically log into the desktop as an `Admin` user.
 - `SetupComplete.cmd`: Runs automatically on first boot. Enables WinRE and registers `firstboot.ps1`.
 - `firstboot.ps1`: Ensures Docker is running (explicitly launching Docker Desktop if necessary), imports Docker images from `C:\Payload\DockerImages`, and automatically executes `install_appstore.bat` if present before cleaning up.
 
