@@ -140,30 +140,6 @@ if errorlevel 1 (
 call :log_info "unattend.xml staged successfully."
 exit /b 0
 
-:configure_oobe_skip_network
-call :log_info "Configuring OOBE to allow skipping network setup"
-reg load HKLM\OfflineSoftware W:\Windows\System32\Config\SOFTWARE >> "%LOG%" 2>&1
-if errorlevel 1 (
-    call :log_warning "Failed to load the offline SOFTWARE hive. OOBE network bypass will not be configured."
-    exit /b 0
-)
-
-reg add HKLM\OfflineSoftware\Microsoft\Windows\CurrentVersion\OOBE /v BypassNRO /t REG_DWORD /d 1 /f >> "%LOG%" 2>&1
-if errorlevel 1 (
-    reg unload HKLM\OfflineSoftware >> "%LOG%" 2>&1
-    call :log_warning "Failed to set BypassNRO in the offline SOFTWARE hive."
-    exit /b 0
-)
-
-reg unload HKLM\OfflineSoftware >> "%LOG%" 2>&1
-if errorlevel 1 (
-    call :log_warning "Failed to unload the offline SOFTWARE hive after setting BypassNRO."
-    exit /b 0
-)
-
-call :log_info "OOBE network bypass configured successfully."
-exit /b 0
-
 :configure_winre
 call :log_info "Setting WinRE path to W:\Windows\System32\Recovery"
 
@@ -267,6 +243,42 @@ set "SOURCE_MEDIA_DRIVE="
 set "MEDIA_LOG_DIR="
 set "MATCH_COUNT=0"
 for /L %%I in (1,1,25) do set "WIM_CANDIDATE_%%I="
+
+rem WinPE drive letters are not stable across hardware, so scan a range instead of hard-coding one letter.
+for %%D in (C D E F G H I J K L M N O P Q R S T U V W X Y Z) do (
+    if exist "%%D:\sources\install.wim" if exist "%%D:\sources\!SOURCE_TAG!" (
+        set /a MATCH_COUNT+=1
+        set "WIM_CANDIDATE_!MATCH_COUNT!=%%D:\sources\install.wim"
+        call :log_info "Found candidate !MATCH_COUNT!: %%D:\sources\install.wim"
+    )
+)
+exit /b 0
+
+:log_info
+call :log_line INFO "%~1"
+exit /b 0
+
+:log_warning
+call :log_line WARNING "%~1"
+exit /b 0
+
+:log_error
+call :log_line ERROR "%~1"
+exit /b 0
+
+:log_line
+echo [%DATE% %TIME%] [%~1] %~2
+>> "%LOG%" echo [%DATE% %TIME%] [%~1] %~2
+exit /b 0
+
+:fail
+call :log_error "%~1"
+call :persist_logs
+echo.
+echo ERROR: %~1
+echo See %LOG% for details.
+pause
+exit /b 1
 
 rem WinPE drive letters are not stable across hardware, so scan a range instead of hard-coding one letter.
 for %%D in (C D E F G H I J K L M N O P Q R S T U V W X Y Z) do (
