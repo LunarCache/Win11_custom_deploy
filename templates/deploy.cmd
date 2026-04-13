@@ -9,7 +9,6 @@ rem 3. Apply the selected image to W: and make it bootable.
 rem 4. Prepare the WinRE path from the applied Windows partition.
 rem 5. Stage first-logon automation files and optional Docker payloads.
 rem 6. Preserve the deployment log and reboot.
-rem 5. Stage first-logon automation files and optional Docker image payloads.
 
 rem These tokens are rendered by Build-WinPEAutoDeploy.ps1 when boot.wim is customized.
 set "TARGET_DISK=__TARGET_DISK__"
@@ -118,7 +117,6 @@ if errorlevel 1 (
     exit /b 1
 )
 
-call :configure_oobe_skip_network
 call :stage_unattend_xml
 call :configure_winre
 call :stage_firstboot_assets

@@ -1,54 +1,121 @@
 # WinPE Auto Deploy Context
 
-This project provides a reusable automation framework for UEFI-only WinPE deployments. It automates the entire lifecycle from building the WinPE environment and preparing bootable media to the final OS configuration and optional Docker payload importing.
+This project provides a WinPE-based Windows deployment pipeline built around a customized `boot.wim`, a single prepared `install.wim` source, and optional first-logon Docker payload execution.
 
-## Project Overview
+## Current implementation summary
 
-- **Core Technology:** Windows ADK (WinPE), PowerShell, Batch/CMD, DiskPart.
-- **Architecture:** UEFI-only, `amd64`.
-- **Primary Goal:** Automated "wipe and reload" of a target disk using a custom `install.wim` from a dual-partition USB (FAT32 for boot, NTFS for large WIM files).
+- Architecture is fixed to `amd64`.
+- Target boot mode is UEFI only.
+- The deployment target disk and WIM index are rendered into `deploy.cmd` during the build phase.
+- Runtime source selection is strict: WinPE scans `C:` through `Z:` and requires exactly one volume containing both:
+  - `\sources\install.wim`
+  - `\sources\winpe-autodeploy.tag`
+- The target disk is wiped and repartitioned as GPT with:
+  - EFI `S:`
+  - MSR
+  - Windows `W:`
+  - Recovery `R:`
 
-## Key Components
+## Build-time components
 
-### 1. Build & Authoring (`scripts/`)
-- `Build-WinPEAutoDeploy.ps1`: Prepares the WinPE work directory. It injects the automation scripts into `boot.wim` and renders configuration tokens. It maintains a minimal WinPE footprint by avoiding unnecessary optional component injections.
-- `Prepare-WinPEUsb.ps1`: Destructive script that formats a USB drive with two partitions and stages the `install.wim` and deployment markers.
-- `Generate-WinPEIso.ps1`: Creates a bootable ISO from the prepared work directory. Supports an optional `-InstallWimPath` to bundle the system image directly into the ISO for standalone deployment.
+### `scripts\Build-WinPEAutoDeploy.ps1`
 
-### 2. WinPE Runtime (`templates/`)
-- `startnet.cmd`: The WinPE entry point. Initializes environment and calls `deploy.cmd`.
-- `deploy.cmd`: The main automation engine. Performs source discovery, disk partitioning, and image application. It utilizes the `reagentc.exe` tool from the newly applied Windows OS partition to configure WinRE, ensuring high reliability without modifying the WinPE image.
-- `diskpart-uefi.txt`: Template for GPT partitioning (EFI, MSR, Windows, Recovery).
+- Requires Administrator.
+- Recreates ADK environment variables inside PowerShell.
+- Runs `copype.cmd`.
+- Mounts `media\sources\boot.wim`.
+- Injects these rendered templates into `Windows\System32` inside the mounted image:
+  - `deploy.cmd`
+  - `diskpart-uefi.txt`
+  - `startnet.cmd`
+  - `firstboot.ps1`
+  - `register-firstboot.ps1`
+  - `SetupComplete.cmd`
+  - `unattend.xml`
 
-### 3. Post-Deployment (`templates/`)
-- `unattend.xml`: Configuration file injected into the deployed OS to completely skip OOBE screens and automatically log into the desktop as an `Admin` user.
-- `SetupComplete.cmd`: Runs automatically on first boot. Enables WinRE and registers `firstboot.ps1`.
-- `firstboot.ps1`: Ensures Docker is running (explicitly launching Docker Desktop if necessary), and automatically executes `install_appstore.bat` if present before cleaning up.
+### `scripts\Prepare-WinPEUsb.ps1`
 
-## Building and Running
+- Requires Administrator.
+- Destructively rebuilds the selected disk as `MBR`.
+- Creates:
+  - FAT32 boot partition labeled `WINPE`
+  - NTFS data partition labeled `IMAGES`
+- Uses `MakeWinPEMedia.cmd /UFD` for the boot partition.
+- Copies `install.wim` and the marker file to `\sources`.
+- Optionally copies payloads to `\payload\docker-images`.
 
-### Preparation
-Run these commands from an **elevated** PowerShell session with Windows ADK installed.
+### `scripts\Generate-WinPEIso.ps1`
 
-```powershell
-# 1. Build the WinPE working directory (Injects automation into boot.wim)
-.\scripts\Build-WinPEAutoDeploy.ps1 -WinPEWorkDir C:\WinPE_AutoDeploy -WimIndex 1 -TargetDisk 0
+- Packages the current `WinPEWorkDir\media` as an ISO.
+- Can optionally copy `install.wim` and payloads into `media\` before packaging.
+- Those copied artifacts remain in the work directory after the ISO is created.
 
-# 2. Prepare the bootable USB (Destructive)
-.\scripts\Prepare-WinPEUsb.ps1 -UsbDiskNumber 1 -WinPEWorkDir C:\WinPE_AutoDeploy -InstallWimPath C:\Path\To\install.wim
-```
+### `scripts\Export-CleanWinPEIso.ps1`
 
-### Deployment
-1. Boot the target machine from the prepared USB in UEFI mode.
-2. WinPE will automatically:
-   - Search for the USB data partition (marked with `winpe-autodeploy.tag`).
-   - Wipe `Disk 0` (or the disk specified during build).
-   - Apply the WIM and configure boot files.
-   - Log progress to `X:\AutoDeploy.log` (preserved to `C:\Windows\Temp\AutoDeploy.log` on completion).
+- Creates a plain ADK-generated WinPE ISO with no project automation injected.
 
-## Development Conventions
+## Runtime flow
 
-- **Tokens:** `deploy.cmd` uses `__TARGET_DISK__` and `__WIM_INDEX__` as placeholders, which are replaced by `Build-WinPEAutoDeploy.ps1` during the build phase.
-- **Error Handling:** Deployment stops immediately if zero or multiple valid `install.wim` sources are found to prevent accidental data loss.
-- **Logging:** All automation steps use `[INFO]`, `[WARNING]`, and `[ERROR]` prefixes for easier parsing.
-- **Elevation:** All scripts in `scripts/` require Administrator privileges for DISM and DiskPart operations.
+### `templates\startnet.cmd`
+
+- Runs `wpeinit`.
+- Calls `X:\Windows\System32\deploy.cmd`.
+
+### `templates\deploy.cmd`
+
+Main responsibilities:
+
+1. Create and write `X:\AutoDeploy.log`.
+2. Find exactly one valid deployment source.
+3. Render `diskpart-uefi.txt` with the configured target disk.
+4. Partition the disk.
+5. Apply the selected image index with `DISM`.
+6. Run `BCDBoot`.
+7. Stage `unattend.xml`.
+8. Set WinRE image path with `W:\Windows\System32\reagentc.exe`.
+9. Stage first-logon scripts into the deployed OS.
+10. Copy optional payload files from `\payload\docker-images`.
+11. Persist logs and reboot.
+
+## Post-deployment components
+
+### `templates\unattend.xml`
+
+- Sets locale to `zh-CN`.
+- Hides major OOBE screens.
+- Creates a local `Admin` account with a blank password.
+- Enables one automatic logon for `Admin`.
+
+### `templates\SetupComplete.cmd`
+
+- Enables WinRE with `reagentc /enable`.
+- Runs `register-firstboot.ps1`.
+
+### `templates\register-firstboot.ps1`
+
+- Registers `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Run\CodexFirstBoot`.
+- Uses `Run`, not `RunOnce`, so first-logon setup can retry on later logons.
+
+### `templates\firstboot.ps1`
+
+- Logs to `C:\ProgramData\FirstBoot\firstboot.log`.
+- If `C:\Payload\DockerImages` does not exist, it marks completion and unregisters itself.
+- If `docker.exe` is missing, it exits with code `1` so Windows runs it again at the next logon.
+- If Docker is installed but not ready, it tries to start Docker Desktop and related services, then retries `docker info` for up to 30 attempts.
+- If Docker becomes ready, it executes:
+  - `load_images.bat`
+  - `install_appstore.bat`
+- It then creates `done.tag` and removes the Run entry.
+
+Important limitation:
+
+- Retry behavior only applies while Docker is unavailable or not ready.
+- Failures inside payload batch files are logged, but they do not block `done.tag` creation.
+
+## Operational notes
+
+- All build and media-preparation scripts assume Windows ADK is installed under:
+  - `C:\Program Files (x86)\Windows Kits\10\Assessment and Deployment Kit`
+- `Prepare-WinPEUsb.ps1` refuses to touch disks reported as boot/system disks.
+- The deployment process stops before disk changes if zero or multiple valid sources are found.
+- Logs are preserved to the deployed OS and, when possible, back to the deployment media.

@@ -1,58 +1,324 @@
-# 企业级全自动系统部署技术方案 (Enterprise Automated Deployment Architecture)
+# 企业级全自动部署架构说明
 
-## 1. 项目背景与目标
+本文档基于仓库当前实现整理，描述实际的构建链路、WinPE 运行时行为、首启阶段逻辑，以及各脚本之间的职责边界。
 
-本项目旨在提供一套高度可靠、可复用的企业级 Windows 系统全自动裸机部署（Wipe and Reload）框架。
-核心目标包括：
-*   **100% 零人工干预 (Zero-Touch)**：从插入介质开机到进入配置完毕的桌面，全程无需用户点击任何按钮或输入信息。
-*   **统一的交付链路**：一套 WinPE 构建工程，同时支持物理机（双分区 USB 介质）和虚拟机（Standalone ISO）。
-*   **强大的 Payload 分发能力**：不仅自动应用基础系统镜像 (`install.wim`)，还支持通用的载荷（如 Docker 镜像、应用安装脚本）随系统一起部署并在首次登录时自动执行。
+## 1. 项目目标与边界
 
-## 2. 系统架构设计
+当前项目实现的是一套面向 `amd64`、仅支持 `UEFI` 的 Windows 自动部署方案，核心目标如下：
 
-本框架分为三个独立但紧密协作的阶段：**构建期 (Authoring)**、**WinPE 运行时 (Deployment)** 和 **Windows 首启期 (Post-Deployment)**。
+- 通过 Windows ADK 生成可复用的 WinPE 工作目录。
+- 将自动化逻辑注入 `boot.wim`，而不是依赖手工修改启动介质。
+- 从准备好的 USB 或 ISO 中自动发现唯一合法的 `install.wim` 源。
+- 自动清空目标磁盘、重建 GPT 分区、应用系统镜像并写入引导。
+- 在离线阶段写入 `unattend.xml`、`SetupComplete.cmd` 与首登脚本。
+- 在首次登录阶段按需初始化 Docker 并执行预置载荷脚本。
 
-### 2.1 构建期 (Authoring Phase)
-负责基于 Windows ADK 生成定制化的 WinPE 环境及部署介质。
+不在当前实现范围内的事项：
 
-*   **`Build-WinPEAutoDeploy.ps1`**：核心预处理脚本。它利用 `copype` 准备工作目录，挂载 `boot.wim`，并将自动化执行引擎 (`deploy.cmd`, `startnet.cmd` 等) 及配置文件（如 `unattend.xml`）注入其中。该脚本执行极简原则，不向 WinPE 注入庞大的可选组件（OC），以保持启动介质极小的体积和极快的加载速度。
-*   **`Prepare-WinPEUsb.ps1`**：物理机介质生成脚本。采用双分区架构：
-    *   分区 1 (FAT32, 引导区)：存放 WinPE 系统，确保在所有 UEFI 固件上的最高兼容性。
-    *   分区 2 (NTFS, 数据区)：突破 FAT32 的 4GB 单文件限制，用于存放体积庞大的 `install.wim`、防错标记文件 (`winpe-autodeploy.tag`) 以及可选的后置安装载荷文件夹 (`\payload\docker-images`)。
-*   **`Generate-WinPEIso.ps1`**：虚拟机介质生成脚本。可将 WinPE 环境、`install.wim` 及载荷文件夹打包为一个独立的、自包含的 ISO 文件，便于在 Hyper-V 或 VMware 等虚拟化平台上进行测试和部署。
+- Legacy BIOS 启动。
+- 多镜像源自动择优。
+- 多目标磁盘自动判定。
+- 基于业务脚本退出码的完整重试机制。
 
-### 2.2 WinPE 运行时 (Deployment Phase)
-目标机器从制作好的 U 盘或 ISO 启动后自动进入本阶段。
+## 2. 构建阶段
 
-*   **`startnet.cmd`**：WinPE 的原生入口，初始化网络和即插即用设备后，立即移交控制权给执行引擎。
-*   **`deploy.cmd`**：自动化部署的主引擎，执行以下严格序列：
-    1.  **强一致性源发现**：扫描所有盘符，严格匹配包含 `\sources\install.wim` 和 `\sources\winpe-autodeploy.tag` 的路径。此设计防止了多磁盘环境下错误覆盖现有系统盘或意外应用非预期的系统镜像。
-    2.  **磁盘分区重建**：调用 `diskpart /s diskpart-uefi.txt` 将目标磁盘（默认 Disk 0）彻底清空并转换为 GPT 格式，构建标准的 UEFI 布局：EFI 引导区 (S:)、MSR 保留区、Windows 系统区 (W:) 及独立的 Recovery 恢复区 (R:)。
-    3.  **镜像应用与引导修复**：利用原生 `DISM` 释放镜像，并调用 `BCDBoot` 重建 EFI 引导。
-    4.  **OOBE 旁路与 WinRE 配置**：
-        *   将预先准备好的无人值守应答文件 (`unattend.xml`) 精准放置到新系统的 `W:\Windows\Panther` 目录下。
-        *   直接调用刚刚解压好的目标系统盘内的工具 (`W:\Windows\System32\reagentc.exe`) 将系统恢复环境（WinRE）精准定位到恢复分区，无需依赖臃肿的 WinPE 组件。
-    5.  **Payload 预埋**：将随介质分发的 `\payload\docker-images` 下的所有文件（脚本、Docker 镜像等）拷贝至新系统的 `C:\Payload\DockerImages`。
-    6.  **持久化日志**：在重启前，将部署日志从内存盘备份到新系统盘 (`C:\Windows\Temp\AutoDeploy.log`)，确保部署过程可被追溯。
+### 2.1 `Build-WinPEAutoDeploy.ps1`
 
-### 2.3 Windows 首启期 (Post-Deployment Phase)
-操作系统第一次启动时的全自动收尾阶段。
+这是项目的核心“制品生成”脚本，职责不是直接做 USB 或 ISO，而是生成一个已经注入自动化逻辑的 WinPE 工作目录。
 
-*   **无人值守 OOBE (`unattend.xml`)**：由于 WinPE 阶段的预埋，Windows 会静默处理所有的开箱体验（语言选择、隐私协议、网络连接等），自动创建一个具有强密码的本地 `Admin` 账户，并通过 `<AutoLogon>` 机制直接无缝登录到桌面。
-*   **系统初始化收尾 (`SetupComplete.cmd`)**：这是 Windows OOBE 结束时的钩子。它不仅会执行 `reagentc /enable` 真正激活 WinRE，更会向系统的 `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Run` 注册表写入一个名为 `CodexFirstBoot` 的自启项，指向我们的终极执行脚本 `firstboot.ps1`。
-*   **环境依赖保障与 Payload 执行 (`firstboot.ps1`)**：由于直接进入桌面，脚本立即被 `Run` 键触发。它的设计极其强健：
-    1.  **依赖唤醒**：主动探测并启动 `Docker Desktop.exe` 的图形界面，强制触发底层的 WSL2 引擎和 Docker 服务的初始化。
-    2.  **死循环等待**：通过不断轮询探测引擎状态（最多等待 5 分钟），确保环境 100% 就绪。若超时，脚本会主动 `exit 1`。由于使用的是持久的 `Run` 键而非 `RunOnce`，下一次用户登录或重启后，脚本会重试，直到成功。
-    3.  **自动部署**：执行所有的前置动作后，脚本寻找并调起通用的用户自定义配置脚本（如 `install_appstore.bat`），完成最终的容器导入和业务系统（如 1Panel）启动。
-    4.  **安全自毁**：当（且仅当）业务脚本正常退出后，`firstboot.ps1` 会删除自身的 `Run` 注册表键，并在目录下生成防重复的 `done.tag` 标记，宣告整个企业级系统交付流程圆满结束。
+实际行为：
 
-## 3. 安全性与可靠性考量
+1. 校验管理员权限。
+2. 重建 ADK 所需环境变量，避免必须从专用 ADK shell 启动。
+3. 调用 `copype.cmd` 生成标准 WinPE 工作目录。
+4. 挂载 `media\sources\boot.wim`。
+5. 将下列模板渲染后写入挂载镜像内的 `Windows\System32`：
+   - `deploy.cmd`
+   - `diskpart-uefi.txt`
+   - `startnet.cmd`
+   - `firstboot.ps1`
+   - `register-firstboot.ps1`
+   - `SetupComplete.cmd`
+   - `unattend.xml`
+6. 使用 `__TARGET_DISK__`、`__WIM_INDEX__` 两个令牌将部署参数固化进运行时脚本。
+7. 成功时提交挂载，失败时丢弃挂载结果。
 
-1.  **严格的灾难预防机制**：
-    *   如果目标机器找不到标记文件，部署直接拒绝开始。
-    *   如果目标磁盘（Disk 0）恰好被识别为系统当前引导磁盘，USB 制作脚本会抛出异常拒绝操作，防止“自杀式格式化”。
-2.  **可追踪的统一日志系统**：
-    *   每个核心步骤均前置了 `[INFO]`、`[WARNING]` 或 `[ERROR]` 标记。
-    *   `deploy.cmd` 的日志记录在系统盘持久保存；首启自动化 (`firstboot.ps1`) 和注册表操作的详细记录持久保存在 `C:\ProgramData\FirstBoot\` 中，极大地方便了大规模部署时的故障排查。
-3.  **避免死锁的机制**：
-    *   废弃了早期依赖 WinPE 内部可选组件库的复杂方案，全面改用目标系统的原生工具（如直接调用解压后 C 盘内的 `reagentc.exe`），彻底消除了因 WinPE 环境语言包不一致或组件残缺带来的不稳定因素。
+默认参数：
+
+- `-Architecture amd64`
+- `-WinPEWorkDir C:\WinPE_AutoDeploy_amd64`
+- `-WimIndex 1`
+- `-TargetDisk 0`
+
+设计特点：
+
+- 只注入必要的运行文件，不额外给 WinPE 注入大体积可选组件。
+- `install.wim` 不进入 `boot.wim`，而是在部署时从介质上发现。
+- 重新构建时要求 `-Force`，避免在未知旧目录上增量修改。
+
+### 2.2 `Prepare-WinPEUsb.ps1`
+
+该脚本负责把已有工作目录转为物理部署介质，执行的是“破坏性重建 USB”流程。
+
+实际行为：
+
+1. 校验管理员权限。
+2. 校验 `WinPEWorkDir\media`、`install.wim`、ADK 工具是否存在。
+3. 读取目标磁盘信息并执行安全检查：
+   - 若磁盘被 Windows 标记为 `IsBoot` 或 `IsSystem`，立即拒绝。
+   - 若总容量不足以容纳 FAT32 启动分区、`install.wim` 和额外 1 GB 缓冲区，立即拒绝。
+   - 若总线类型不是 `USB`，只给出警告，不阻止继续。
+4. 清空目标磁盘并初始化为 `MBR`。
+5. 创建双分区结构：
+   - 分区 1：FAT32，默认 2048 MB，卷标 `WINPE`
+   - 分区 2：NTFS，占用剩余空间，卷标 `IMAGES`
+6. 使用 `MakeWinPEMedia.cmd /UFD` 将 WinPE 启动文件写入 FAT32 分区。
+7. 在 NTFS 分区写入：
+   - `\sources\install.wim`
+   - `\sources\winpe-autodeploy.tag`
+8. 如果指定了 `-DockerImagesDirectory`，则递归复制到 `\payload\docker-images\`
+
+设计原因：
+
+- USB 介质用 `MBR + FAT32` 启动分区，提高可移动介质的固件兼容性。
+- 数据分区用 NTFS，规避 FAT32 单文件 4 GB 限制。
+
+### 2.3 `Generate-WinPEIso.ps1`
+
+该脚本不会重新构建 `boot.wim`，而是将现有工作目录直接打包成 ISO。
+
+实际行为：
+
+- 默认输出 ISO 到 `WinPEWorkDir` 下，名称为 `<工作目录名>.iso`
+- 若传入 `-InstallWimPath`，会先复制到 `media\sources\install.wim`，并写入 `winpe-autodeploy.tag`
+- 若传入 `-DockerImagesDirectory`，会先复制到 `media\payload\docker-images`
+- 然后调用 `MakeWinPEMedia.cmd /ISO`
+
+实现注意点：
+
+- 该脚本会修改工作目录下的 `media\` 内容。
+- 复制进去的 `install.wim` 和 payload 不会在 ISO 打包后自动清理。
+
+### 2.4 `Export-CleanWinPEIso.ps1`
+
+该脚本生成完全不带项目自动化逻辑的“纯净 WinPE ISO”，适合手工维护、故障排查或在虚拟机中采集新镜像。
+
+与主构建脚本的关键区别：
+
+- 不挂载 `boot.wim`
+- 不注入任何模板
+- 直接基于 ADK 生成标准 WinPE 媒体并打包为 ISO
+
+## 3. WinPE 运行时架构
+
+### 3.1 启动入口
+
+`startnet.cmd` 非常简单，只做两件事：
+
+1. 调用 `wpeinit`
+2. 调用 `X:\Windows\System32\deploy.cmd`
+
+这种设计保证 WinPE 启动入口保持极简，全部业务逻辑集中在 `deploy.cmd`。
+
+### 3.2 `deploy.cmd` 的真实流程
+
+`deploy.cmd` 是整个部署过程的主引擎，当前实现流程如下：
+
+1. 初始化日志到 `X:\AutoDeploy.log`
+2. 读取构建阶段渲染进去的：
+   - `TARGET_DISK`
+   - `WIM_INDEX`
+3. 调用 `:scan_sources` 扫描 `C:` 到 `Z:`，寻找同时满足以下条件的卷：
+   - `\sources\install.wim`
+   - `\sources\winpe-autodeploy.tag`
+4. 如果匹配数为 0 或大于 1，则立即停止，且不会修改目标盘
+5. 将 `diskpart-uefi.txt` 按当前 `TARGET_DISK` 渲染为运行时版本
+6. 调用 `diskpart /s` 清空并重建目标盘
+7. 校验 `W:` 和 `S:` 是否生成成功
+8. 执行：
+   - `dism /Apply-Image`
+   - `bcdboot W:\Windows /s S: /f UEFI`
+9. 执行后续子流程：
+   - `:stage_unattend_xml`
+   - `:configure_winre`
+   - `:stage_firstboot_assets`
+10. 持久化日志并重启
+
+### 3.3 磁盘布局
+
+`diskpart-uefi.txt` 固定生成如下 GPT 布局：
+
+1. EFI 分区，100 MB，盘符 `S:`
+2. MSR 分区，16 MB
+3. Windows 主分区，盘符 `W:`
+4. Recovery 分区，盘符 `R:`
+
+恢复分区在创建后立即设置为 Windows Recovery GPT 类型，并写入隐藏属性：
+
+- `id=de94bba4-06d1-4d40-a16a-bfd50179d6ac`
+- `gpt attributes=0x8000000000000001`
+
+### 3.4 WinRE 配置策略
+
+WinRE 配置分两步：
+
+- WinPE 阶段执行：
+  - `W:\Windows\System32\reagentc.exe /Setreimage /Path W:\Windows\System32\Recovery /Target W:\Windows`
+- 首启阶段执行：
+  - `reagentc /enable`
+
+这套做法的特点是：
+
+- 不依赖给 WinPE 额外注入完整恢复相关组件
+- 直接使用刚展开到目标系统中的 `reagentc.exe`
+
+## 4. 离线阶段注入内容
+
+### 4.1 `unattend.xml`
+
+当前实际配置不是“完全无人值守的一切细节自定义”，而是聚焦以下事项：
+
+- 语言区域固定为 `zh-CN`
+- 隐藏 EULA、OEM 注册页、在线账户页、无线网络页
+- 本地创建 `Admin` 管理员账户
+- 密码为空
+- 自动登录次数为 `1`
+
+因此，文档中如果把它描述成“复杂的企业域接入或全量 OOBE 自定义”，都不准确。当前实现是一个偏简化的离线 OOBE 绕过配置。
+
+### 4.2 首启相关文件
+
+`deploy.cmd` 会把以下文件复制进已部署系统：
+
+- `W:\ProgramData\FirstBoot\firstboot.ps1`
+- `W:\ProgramData\FirstBoot\register-firstboot.ps1`
+- `W:\Windows\Setup\Scripts\SetupComplete.cmd`
+
+如果这些文件任一缺失，当前实现不会中止部署，只会记一条 warning 并继续完成系统安装。
+
+### 4.3 Payload 复制逻辑
+
+若源介质存在 `\payload\docker-images\`，`deploy.cmd` 会递归复制整个目录到：
+
+```text
+W:\Payload\DockerImages
+```
+
+这里复制是“全量复制目录内容”，但自动执行逻辑只识别其中两个脚本：
+
+- `load_images.bat`
+- `install_appstore.bat`
+
+其他文件只会被原样带入系统，不会被自动执行。
+
+## 5. Windows 首启阶段
+
+### 5.1 `SetupComplete.cmd`
+
+该脚本在 OOBE 接近结束时运行，职责非常明确：
+
+1. 创建 `C:\ProgramData\FirstBoot`
+2. 记录 `setupcomplete.log`
+3. 执行 `reagentc /enable`
+4. 调用 `register-firstboot.ps1`
+
+如果注册失败，当前实现只记录 warning，不会让系统安装失败。
+
+### 5.2 `register-firstboot.ps1`
+
+该脚本通过以下位置注册首登任务：
+
+```text
+HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Run\CodexFirstBoot
+```
+
+其命令行本质上是：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\ProgramData\FirstBoot\firstboot.ps1
+```
+
+这里使用的是 `Run` 而不是 `RunOnce`，原因是允许 Docker 尚未就绪时在后续登录再次执行。
+
+### 5.3 `firstboot.ps1`
+
+这是首启逻辑的最终执行点。当前实现可以概括为：
+
+1. 初始化日志文件 `C:\ProgramData\FirstBoot\firstboot.log`
+2. 如果已存在 `done.tag`，则删除 Run 注册并退出
+3. 如果 `C:\Payload\DockerImages` 不存在：
+   - 写入 `done.tag`
+   - 删除 Run 注册
+   - 正常退出
+4. 查找 `docker.exe`
+5. 如果 Docker Desktop 存在且未运行，尝试启动 GUI
+6. 尝试启动：
+   - `com.docker.service`
+   - `docker`
+7. 最多执行 30 次 `docker info` 探测，每次间隔 10 秒
+8. Docker 就绪后，按存在性执行：
+   - `load_images.bat`
+   - `install_appstore.bat`
+9. 创建 `done.tag`
+10. 删除 Run 注册
+
+### 5.4 真实的重试语义
+
+这一点是文档最容易写错的地方。当前实现的重试语义是：
+
+- 如果 `docker.exe` 缺失，脚本 `exit 1`，Run 项保留，下次登录重试
+- 如果 Docker 始终未就绪，脚本 `exit 1`，Run 项保留，下次登录重试
+- 如果 `load_images.bat` 或 `install_appstore.bat` 执行异常，错误会被记录，但脚本仍会继续走到末尾
+- 到达末尾后会创建 `done.tag` 并移除 Run 项
+
+因此，当前实现不是“业务脚本失败也会自动重试”的设计，只是“Docker 前置条件不满足时可重试”。
+
+## 6. 日志与可观测性
+
+### 6.1 WinPE 阶段
+
+主日志位于：
+
+- `X:\AutoDeploy.log`
+
+部署成功或失败前，`deploy.cmd` 会尝试持久化到：
+
+- `W:\Windows\Temp\AutoDeploy.log`
+- `\<部署介质>\DeployLogs\AutoDeploy.log`
+
+日志格式使用：
+
+- `[INFO]`
+- `[WARNING]`
+- `[ERROR]`
+
+### 6.2 首启阶段
+
+首启相关日志位于：
+
+- `C:\ProgramData\FirstBoot\setupcomplete.log`
+- `C:\ProgramData\FirstBoot\register-firstboot.log`
+- `C:\ProgramData\FirstBoot\firstboot.log`
+
+## 7. 风险与当前实现限制
+
+根据当前代码，下面这些限制应在所有相关文档中明确说明：
+
+1. 目标磁盘由构建阶段固化，运行时不会动态选择。
+2. WinPE 只接受“恰好一个”合法镜像源，多源环境下会直接拒绝。
+3. `unattend.xml` 当前创建的是空密码本地管理员账户，这在受控实验环境以外通常需要额外安全评估。
+4. `Generate-WinPEIso.ps1` 会污染现有工作目录中的 `media\` 内容。
+5. 首启阶段只对 Docker 未就绪场景保留自动重试，不对业务脚本失败做重试。
+
+## 8. 建议的阅读顺序
+
+如果要继续深入实现，推荐按以下顺序阅读：
+
+1. `scripts\Build-WinPEAutoDeploy.ps1`
+2. `templates\deploy.cmd`
+3. `templates\firstboot.ps1`
+4. `templates\SetupComplete.cmd`
+5. `scripts\Prepare-WinPEUsb.ps1`
+6. `scripts\Generate-WinPEIso.ps1`
+
+这样可以先理解“构建时如何注入”，再理解“运行时如何执行”，最后再看介质分发与测试产物。
