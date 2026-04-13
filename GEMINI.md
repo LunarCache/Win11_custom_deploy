@@ -13,7 +13,7 @@ This project provides a reusable automation framework for UEFI-only WinPE deploy
 ### 1. Build & Authoring (`scripts/`)
 - `Build-WinPEAutoDeploy.ps1`: Prepares the WinPE work directory. It injects the automation scripts into `boot.wim` and renders configuration tokens. It maintains a minimal WinPE footprint by avoiding unnecessary optional component injections.
 - `Prepare-WinPEUsb.ps1`: Destructive script that formats a USB drive with two partitions and stages the `install.wim` and deployment markers.
-- `Generate-WinPEIso.ps1`: Creates a bootable ISO from the prepared work directory (useful for VM testing).
+- `Generate-WinPEIso.ps1`: Creates a bootable ISO from the prepared work directory. Supports an optional `-InstallWimPath` to bundle the system image directly into the ISO for standalone deployment.
 
 ### 2. WinPE Runtime (`templates/`)
 - `startnet.cmd`: The WinPE entry point. Initializes environment and calls `deploy.cmd`.

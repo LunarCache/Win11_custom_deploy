@@ -18,6 +18,8 @@ param(
 
     [string]$IsoPath,
 
+    [string]$InstallWimPath,
+
     [string]$AdkRoot = 'C:\Program Files (x86)\Windows Kits\10\Assessment and Deployment Kit',
 
     [switch]$Force
@@ -144,7 +146,30 @@ if (Test-Path -LiteralPath $IsoPath) {
     Remove-Item -LiteralPath $IsoPath -Force
 }
 
+if ($InstallWimPath) {
+    if (-not (Test-Path -LiteralPath $InstallWimPath)) {
+        throw "install.wim was not found at $InstallWimPath"
+    }
+
+    $sourceDir = Join-Path $mediaDir 'sources'
+    if (-not (Test-Path -LiteralPath $sourceDir)) {
+        New-Item -ItemType Directory -Path $sourceDir -Force | Out-Null
+    }
+
+    $destinationWimPath = Join-Path $sourceDir 'install.wim'
+    Write-Host "Copying install.wim to $destinationWimPath..." -ForegroundColor Cyan
+    Copy-Item -LiteralPath $InstallWimPath -Destination $destinationWimPath -Force
+
+    $tagPath = Join-Path $sourceDir 'winpe-autodeploy.tag'
+    Set-Content -LiteralPath $tagPath -Value @(
+        'WinPE Auto Deploy Standalone ISO source'
+        ('Created={0}' -f (Get-Date -Format s))
+        ('SourceWim={0}' -f $InstallWimPath)
+    ) -Encoding ASCII
+}
+
 # Package the already-customized WinPE media directory as a bootable ISO.
+Write-Host "Packaging ISO..." -ForegroundColor Cyan
 Invoke-ExternalCommand -FilePath $makeWinPEMediaPath -Arguments @(
     '/ISO',
     $WinPEWorkDir,

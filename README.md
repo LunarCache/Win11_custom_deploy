@@ -40,10 +40,10 @@ If you also want Docker image tar files copied to the deployment media:
 .\scripts\Prepare-WinPEUsb.ps1 -UsbDiskNumber 1 -WinPEWorkDir C:\WinPE_AutoDeploy_amd64 -InstallWimPath C:\WorkSpace\Win11_Custom\install.wim -DockerImagesDirectory C:\Payload\DockerImages
 ```
 
-To generate an ISO for VM testing after the WinPE work directory has been built:
+To generate a standalone ISO for VM testing (bundling the install.wim directly into the ISO):
 
 ```powershell
-.\scripts\Generate-WinPEIso.ps1 -WinPEWorkDir C:\WinPE_AutoDeploy_amd64 -Force
+.\scripts\Generate-WinPEIso.ps1 -WinPEWorkDir C:\WinPE_AutoDeploy_amd64 -InstallWimPath C:\Users\ERAZER\Downloads\install.wim -Force
 ```
 
 ## Notes
