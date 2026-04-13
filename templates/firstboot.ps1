@@ -47,7 +47,7 @@ function Resolve-DockerCommand {
     return $null
 }
 
-function Ensure-DockerReady {
+function Wait-DockerReady {
     param(
         [Parameter(Mandatory = $true)]
         [string]$DockerExe
