@@ -119,6 +119,18 @@ if (-not (Wait-DockerReady -DockerExe $dockerExe)) {
     exit 1
 }
 
+$loadImagesScript = Join-Path $dockerPayloadDir 'load_images.bat'
+if (Test-Path -LiteralPath $loadImagesScript) {
+    Write-Log -Level 'INFO' -Message ("Executing docker images load script: {0}" -f $loadImagesScript)
+    try {
+        $process = Start-Process -FilePath $loadImagesScript -Wait -PassThru
+        Write-Log -Level 'INFO' -Message ("Load script finished with exit code {0}." -f $process.ExitCode)
+    }
+    catch {
+        Write-Log -Level 'ERROR' -Message ("Failed to execute load script: {0}" -f $_.Exception.Message)
+    }
+}
+
 $appstoreScript = Join-Path $dockerPayloadDir 'install_appstore.bat'
 if (Test-Path -LiteralPath $appstoreScript) {
     Write-Log -Level 'INFO' -Message ("Executing appstore setup script: {0}" -f $appstoreScript)
