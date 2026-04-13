@@ -5,8 +5,8 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 # This script is staged into the deployed operating system and runs on user logon
-# until it completes successfully. Its job is limited to importing Docker image tar
-# files that were copied into C:\Payload\DockerImages during WinPE deployment.
+# until it completes successfully. Its job is to ensure the Docker daemon is ready
+# and then execute the payload setup script (e.g. install_appstore.bat).
 
 $baseDir = 'C:\ProgramData\FirstBoot'
 $logPath = Join-Path $baseDir 'firstboot.log'
@@ -93,7 +93,7 @@ if (-not (Test-Path -LiteralPath $baseDir)) {
     New-Item -ItemType Directory -Path $baseDir -Force | Out-Null
 }
 
-Write-Log -Level 'INFO' -Message 'First-logon Docker payload import started.'
+Write-Log -Level 'INFO' -Message 'First-logon setup started.'
 
 if (Test-Path -LiteralPath $markerPath) {
     Write-Log -Level 'INFO' -Message 'Marker file already exists. Cleaning up Run registration and exiting.'
@@ -102,15 +102,7 @@ if (Test-Path -LiteralPath $markerPath) {
 }
 
 if (-not (Test-Path -LiteralPath $dockerPayloadDir)) {
-    Write-Log -Level 'INFO' -Message 'No Docker payload directory exists at C:\Payload\DockerImages. Skipping Docker image import.'
-    New-Item -ItemType File -Path $markerPath -Force | Out-Null
-    Remove-RunRegistration
-    exit 0
-}
-
-$tarFiles = Get-ChildItem -LiteralPath $dockerPayloadDir -Filter *.tar -File -ErrorAction SilentlyContinue | Sort-Object Name
-if (-not $tarFiles) {
-    Write-Log -Level 'INFO' -Message 'No Docker image tar files were found in C:\Payload\DockerImages. Skipping Docker image import.'
+    Write-Log -Level 'INFO' -Message 'No payload directory exists at C:\Payload\DockerImages. Skipping setup.'
     New-Item -ItemType File -Path $markerPath -Force | Out-Null
     Remove-RunRegistration
     exit 0
@@ -118,28 +110,13 @@ if (-not $tarFiles) {
 
 $dockerExe = Resolve-DockerCommand
 if (-not $dockerExe) {
-    Write-Log -Level 'WARNING' -Message 'docker.exe was not found. The import will retry on the next logon.'
+    Write-Log -Level 'WARNING' -Message 'docker.exe was not found. Setup will retry on the next logon.'
     exit 1
 }
 
 if (-not (Wait-DockerReady -DockerExe $dockerExe)) {
-    Write-Log -Level 'WARNING' -Message 'Docker daemon never became ready. The import will retry on the next logon.'
+    Write-Log -Level 'WARNING' -Message 'Docker daemon never became ready. Setup will retry on the next logon.'
     exit 1
-}
-
-foreach ($tarFile in $tarFiles) {
-    Write-Log -Level 'INFO' -Message ("Importing Docker image tar: {0}" -f $tarFile.FullName)
-    $output = & $dockerExe load -i $tarFile.FullName 2>&1
-    $exitCode = $LASTEXITCODE
-
-    foreach ($line in $output) {
-        Add-Content -LiteralPath $logPath -Value $line
-    }
-
-    if ($exitCode -ne 0) {
-        Write-Log -Level 'ERROR' -Message ("Docker import failed for {0}. The import will retry on the next logon." -f $tarFile.Name)
-        exit 1
-    }
 }
 
 $appstoreScript = Join-Path $dockerPayloadDir 'install_appstore.bat'
@@ -156,6 +133,6 @@ if (Test-Path -LiteralPath $appstoreScript) {
 }
 
 New-Item -ItemType File -Path $markerPath -Force | Out-Null
-Write-Log -Level 'INFO' -Message 'Docker payload import completed successfully.'
+Write-Log -Level 'INFO' -Message 'Payload setup completed successfully.'
 Remove-RunRegistration
 exit 0
