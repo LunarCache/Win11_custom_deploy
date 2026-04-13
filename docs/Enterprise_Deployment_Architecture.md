@@ -68,6 +68,7 @@
    - 若磁盘被 Windows 标记为 `IsBoot` 或 `IsSystem`，立即拒绝。
    - 若总容量不足以容纳 FAT32 启动分区、`install.wim` 和额外 1 GB 缓冲区，立即拒绝。
    - 若总线类型不是 `USB`，只给出警告，不阻止继续。
+   - 若传入了 `-DockerImagesDirectory`，也会在任何清盘操作前先校验该目录是否存在。
 4. 清空目标磁盘并初始化为 `MBR`。
 5. 创建双分区结构：
    - 分区 1：FAT32，默认 2048 MB，卷标 `WINPE`
@@ -98,6 +99,7 @@
 
 - 原始工作目录不会被 ISO 打包过程污染。
 - 临时 staging 目录在打包结束后会被清理。
+- 可选输入路径会在 staging 创建前先完成校验；如果后续步骤失败，临时 staging 目录仍会进入清理流程。
 
 ### 2.4 `Export-CleanWinPEIso.ps1`
 

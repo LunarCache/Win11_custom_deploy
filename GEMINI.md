@@ -43,12 +43,14 @@ This project provides a WinPE-based Windows deployment pipeline built around a c
 - Uses `MakeWinPEMedia.cmd /UFD` for the boot partition.
 - Copies `install.wim` and the marker file to `\sources`.
 - Optionally copies payloads to `\payload\docker-images`.
+- Validates an optional `-DockerImagesDirectory` before any disk-wiping step.
 
 ### `scripts\Generate-WinPEIso.ps1`
 
 - Packages the current `WinPEWorkDir\media` as an ISO.
 - Can optionally inject `install.wim` and payloads into a temporary staging copy before packaging.
 - The original work directory is left unchanged after ISO creation.
+- Optional source paths are validated before staging, and the temporary staging tree is removed even if packaging later fails.
 
 ### `scripts\Export-CleanWinPEIso.ps1`
 

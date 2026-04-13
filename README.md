@@ -115,6 +115,7 @@ USB-specific notes:
 - The USB disk is initialized as `MBR` for removable-media compatibility.
 - The boot partition defaults to `2048 MB` and must be between `1024` and `32768` MB.
 - The script refuses to operate on a disk that Windows reports as `IsBoot` or `IsSystem`.
+- If `-DockerImagesDirectory` is provided, the script validates that path before any disk-wiping step begins.
 
 ### 3. Generate an ISO for VM testing
 
@@ -141,6 +142,7 @@ Important behavior:
 - `Generate-WinPEIso.ps1` packages the current contents of `WinPEWorkDir\media`.
 - If `-InstallWimPath` or `-DockerImagesDirectory` is used, the script first creates a temporary staging copy of the work directory, injects those files there, and packages from that staging tree.
 - The original `WinPEWorkDir\media` contents are left unchanged.
+- Optional source paths are validated before staging begins, and any temporary staging tree is cleaned up if packaging later fails.
 
 ### 4. Export a plain WinPE ISO
 
