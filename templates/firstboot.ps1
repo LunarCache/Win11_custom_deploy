@@ -122,7 +122,7 @@ if (-not $dockerExe) {
     exit 1
 }
 
-if (-not (Ensure-DockerReady -DockerExe $dockerExe)) {
+if (-not (Wait-DockerReady -DockerExe $dockerExe)) {
     Write-Log -Level 'WARNING' -Message 'Docker daemon never became ready. The import will retry on the next logon.'
     exit 1
 }
