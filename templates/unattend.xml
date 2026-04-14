@@ -20,38 +20,8 @@
                    language="neutral"
                    versionScope="nonSxS">
             <OOBE>
-                <HideEULAPage>true</HideEULAPage>
-                <HideOEMRegistrationScreen>true</HideOEMRegistrationScreen>
-                <HideOnlineAccountScreens>true</HideOnlineAccountScreens>
                 <HideWirelessSetupInOOBE>true</HideWirelessSetupInOOBE>
-                <ProtectYourPC>3</ProtectYourPC>
-                <NetworkLocation>Work</NetworkLocation>
             </OOBE>
-
-            <UserAccounts>
-                <LocalAccounts>
-                    <LocalAccount wcm:action="add">
-                        <Password>
-                            <Value></Value>
-                            <PlainText>true</PlainText>
-                        </Password>
-                        <Description>Admin</Description>
-                        <DisplayName>Admin</DisplayName>
-                        <Group>Administrators</Group>
-                        <Name>Admin</Name>
-                    </LocalAccount>
-                </LocalAccounts>
-            </UserAccounts>
-
-            <AutoLogon>
-                <Password>
-                    <Value></Value>
-                    <PlainText>true</PlainText>
-                </Password>
-                <Enabled>true</Enabled>
-                <LogonCount>1</LogonCount>
-                <Username>Admin</Username>
-            </AutoLogon>
         </component>
     </settings>
 </unattend>

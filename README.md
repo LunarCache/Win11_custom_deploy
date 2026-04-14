@@ -47,7 +47,7 @@ This repository builds a reusable UEFI-only WinPE deployment environment for app
   - WinPE bootstrap entry point that runs `wpeinit` and then `deploy.cmd`.
 - `templates\unattend.xml`
   - Offline OOBE settings for `zh-CN`.
-  - Creates a local `Admin` account with a blank password and auto-logon count `1`.
+  - Only skips the network setup page during OOBE; the rest of the first-run flow remains standard Windows setup.
 - `templates\SetupComplete.cmd`
   - Runs `reagentc /enable` inside the deployed OS.
   - Registers `firstboot.ps1` through `register-firstboot.ps1`.
@@ -177,7 +177,7 @@ After Windows boots:
 
 - `SetupComplete.cmd` enables WinRE with `reagentc /enable`.
 - `register-firstboot.ps1` creates `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Run\CodexFirstBoot`.
-- `firstboot.ps1` runs on logon and behaves as follows:
+- `firstboot.ps1` runs on the first successful user logon and behaves as follows:
   - If `C:\Payload\DockerImages` does not exist, it writes `done.tag`, removes the Run entry, and exits.
   - If `docker.exe` is missing, it exits with code `1` so the Run entry remains for the next logon.
   - If Docker is installed but not ready, it tries to start Docker Desktop and related services, then retries `docker info` for up to 30 attempts with 10-second waits.

@@ -84,9 +84,8 @@ Main responsibilities:
 ### `templates\unattend.xml`
 
 - Sets locale to `zh-CN`.
-- Hides major OOBE screens.
-- Creates a local `Admin` account with a blank password.
-- Enables one automatic logon for `Admin`.
+- Only skips the network setup page during OOBE.
+- Leaves the rest of the first-run Windows setup flow unchanged.
 
 ### `templates\SetupComplete.cmd`
 
