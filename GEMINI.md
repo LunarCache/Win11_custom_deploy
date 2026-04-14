@@ -100,12 +100,15 @@ Main responsibilities:
 ### `templates\firstboot.ps1`
 
 - Logs to `C:\ProgramData\FirstBoot\firstboot.log`.
+- Writes per-script payload logs to `C:\ProgramData\FirstBoot\PayloadLogs`.
 - If `C:\Payload\DockerImages` does not exist, it marks completion and unregisters itself.
 - If `docker.exe` is missing, it exits with code `1` so Windows runs it again at the next logon.
 - If Docker is installed but not ready, it tries to start Docker Desktop and related services, then retries `docker info` for up to 30 attempts.
 - If Docker becomes ready, it executes:
   - `load_images.bat`
   - `install_appstore.bat`
+- `load_images.bat` is captured to its own payload log.
+- `install_appstore.bat` keeps a visible console window, writes non-sensitive details to its own payload log, only shows the final credentials in the console window, and leaves the window open after success.
 - It creates `done.tag` and removes the Run entry only when all detected payload scripts return exit code `0`.
 
 Important limitation:

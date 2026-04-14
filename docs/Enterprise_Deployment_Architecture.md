@@ -245,22 +245,26 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\ProgramData\FirstBoot
 这是首启逻辑的最终执行点。当前实现可以概括为：
 
 1. 初始化日志文件 `C:\ProgramData\FirstBoot\firstboot.log`
-2. 如果已存在 `done.tag`，则删除 Run 注册并退出
-3. 如果 `C:\Payload\DockerImages` 不存在：
+2. 创建 `C:\ProgramData\FirstBoot\PayloadLogs`
+3. 为每个 payload 脚本生成独立日志路径并写回 `firstboot.log`
+4. 如果已存在 `done.tag`，则删除 Run 注册并退出
+5. 如果 `C:\Payload\DockerImages` 不存在：
    - 写入 `done.tag`
    - 删除 Run 注册
    - 正常退出
-4. 查找 `docker.exe`
-5. 如果 Docker Desktop 存在且未运行，尝试启动 GUI
-6. 尝试启动：
+6. 查找 `docker.exe`
+7. 如果 Docker Desktop 存在且未运行，尝试启动 GUI
+8. 尝试启动：
    - `com.docker.service`
    - `docker`
-7. 最多执行 30 次 `docker info` 探测，每次间隔 10 秒
-8. Docker 就绪后，按存在性执行：
+9. 最多执行 30 次 `docker info` 探测，每次间隔 10 秒
+10. Docker 就绪后，按存在性执行：
    - `load_images.bat`
    - `install_appstore.bat`
-9. 仅当所有已发现的 payload 脚本都返回 `0` 时才创建 `done.tag`
-10. 仅在上述成功条件满足时删除 Run 注册
+11. `load_images.bat` 通过调用层隐藏执行，标准输出和标准错误写入独立 payload 日志
+12. `install_appstore.bat` 保持可见控制台窗口，非敏感执行细节写入独立 payload 日志，最终用户名与密码只显示在控制台，且成功后窗口不会立即关闭
+13. 仅当所有已发现的 payload 脚本都返回 `0` 时才创建 `done.tag`
+14. 仅在上述成功条件满足时删除 Run 注册
 
 ### 5.4 真实的重试语义
 
@@ -299,6 +303,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\ProgramData\FirstBoot
 - `C:\ProgramData\FirstBoot\setupcomplete.log`
 - `C:\ProgramData\FirstBoot\register-firstboot.log`
 - `C:\ProgramData\FirstBoot\firstboot.log`
+- `C:\ProgramData\FirstBoot\PayloadLogs\load_images_<timestamp>.log`
+- `C:\ProgramData\FirstBoot\PayloadLogs\install_appstore_<timestamp>.log`
 
 ## 7. 风险与当前实现限制
 

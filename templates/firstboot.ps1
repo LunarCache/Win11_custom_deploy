@@ -10,6 +10,7 @@ Set-StrictMode -Version Latest
 
 $baseDir = 'C:\ProgramData\FirstBoot'
 $logPath = Join-Path $baseDir 'firstboot.log'
+$payloadLogsDir = Join-Path $baseDir 'PayloadLogs'
 $markerPath = Join-Path $baseDir 'done.tag'
 $dockerPayloadDir = 'C:\Payload\DockerImages'
 $runKeyPath = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run'
@@ -36,6 +37,17 @@ function Remove-RunRegistration {
 function Mark-Completed {
     New-Item -ItemType File -Path $markerPath -Force | Out-Null
     Remove-RunRegistration
+}
+
+function New-PayloadLogPath {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ScriptPath
+    )
+
+    $scriptName = [System.IO.Path]::GetFileNameWithoutExtension($ScriptPath)
+    $timestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
+    return Join-Path $payloadLogsDir ('{0}_{1}.log' -f $scriptName, $timestamp)
 }
 
 function Resolve-DockerCommand {
@@ -105,11 +117,23 @@ function Invoke-PayloadScript {
         [switch]$VisibleWindow
     )
 
+    $payloadLogPath = New-PayloadLogPath -ScriptPath $ScriptPath
+    New-Item -ItemType File -Path $payloadLogPath -Force | Out-Null
+
     Write-Log -Level 'INFO' -Message ("Executing {0}: {1}" -f $DisplayName, $ScriptPath)
+    Write-Log -Level 'INFO' -Message ("Payload log path: {0}" -f $payloadLogPath)
 
     try {
+        $commandLine = if ($VisibleWindow) {
+            'call "{0}" "{1}"' -f $ScriptPath, $payloadLogPath
+        }
+        else {
+            'call "{0}" >> "{1}" 2>>&1' -f $ScriptPath, $payloadLogPath
+        }
+
         $startProcessArgs = @{
-            FilePath = $ScriptPath
+            FilePath   = 'cmd.exe'
+            ArgumentList = @('/d', '/c', $commandLine)
             Wait     = $true
             PassThru = $true
         }
@@ -117,24 +141,31 @@ function Invoke-PayloadScript {
         if ($VisibleWindow) {
             $startProcessArgs.WindowStyle = 'Normal'
         }
+        else {
+            $startProcessArgs.WindowStyle = 'Hidden'
+        }
 
         $process = Start-Process @startProcessArgs
         if ($process.ExitCode -eq 0) {
-            Write-Log -Level 'INFO' -Message ("{0} finished with exit code 0." -f $DisplayName)
+            Write-Log -Level 'INFO' -Message ("{0} finished with exit code 0. Details: {1}" -f $DisplayName, $payloadLogPath)
             return $true
         }
 
-        Write-Log -Level 'WARNING' -Message ("{0} finished with non-zero exit code {1}. Setup will retry on the next logon." -f $DisplayName, $process.ExitCode)
+        Write-Log -Level 'WARNING' -Message ("{0} finished with non-zero exit code {1}. Details: {2}. Setup will retry on the next logon." -f $DisplayName, $process.ExitCode, $payloadLogPath)
         return $false
     }
     catch {
-        Write-Log -Level 'ERROR' -Message ("Failed to execute {0}: {1}" -f $DisplayName, $_.Exception.Message)
+        Write-Log -Level 'ERROR' -Message ("Failed to execute {0}: {1}. Intended payload log: {2}" -f $DisplayName, $_.Exception.Message, $payloadLogPath)
         return $false
     }
 }
 
 if (-not (Test-Path -LiteralPath $baseDir)) {
     New-Item -ItemType Directory -Path $baseDir -Force | Out-Null
+}
+
+if (-not (Test-Path -LiteralPath $payloadLogsDir)) {
+    New-Item -ItemType Directory -Path $payloadLogsDir -Force | Out-Null
 }
 
 Write-Log -Level 'INFO' -Message 'First-logon setup started.'

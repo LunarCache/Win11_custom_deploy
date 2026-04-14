@@ -55,6 +55,7 @@ This repository builds a reusable UEFI-only WinPE deployment environment for app
   - Runs on user logon from `HKLM\...\Run`.
   - Ensures Docker is present and ready.
   - Executes `load_images.bat` and `install_appstore.bat` if they exist in `C:\Payload\DockerImages`.
+  - Writes payload logs to `C:\ProgramData\FirstBoot\PayloadLogs\`.
   - Removes the Run registration only after Docker is ready and all detected payload scripts return exit code `0`.
 
 ## Requirements
@@ -184,6 +185,8 @@ After Windows boots:
   - If Docker becomes ready, it executes:
     - `C:\Payload\DockerImages\load_images.bat` when present
     - `C:\Payload\DockerImages\install_appstore.bat` when present
+  - `load_images.bat` runs hidden and writes its output to `C:\ProgramData\FirstBoot\PayloadLogs\load_images_<timestamp>.log`.
+  - `install_appstore.bat` runs in a visible console window, writes non-sensitive execution details to `C:\ProgramData\FirstBoot\PayloadLogs\install_appstore_<timestamp>.log`, shows the final username/password only in the console window, and keeps that window open after success.
   - It creates `C:\ProgramData\FirstBoot\done.tag` and removes the Run entry only if all detected payload scripts succeed.
 
 Important limitation:
@@ -231,3 +234,5 @@ C:\Windows\Setup\Scripts\SetupComplete.cmd
   - `C:\ProgramData\FirstBoot\setupcomplete.log`
   - `C:\ProgramData\FirstBoot\register-firstboot.log`
   - `C:\ProgramData\FirstBoot\firstboot.log`
+  - `C:\ProgramData\FirstBoot\PayloadLogs\load_images_<timestamp>.log`
+  - `C:\ProgramData\FirstBoot\PayloadLogs\install_appstore_<timestamp>.log`
