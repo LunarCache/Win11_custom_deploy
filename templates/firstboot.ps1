@@ -17,6 +17,8 @@ $runKeyPath = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run'
 $runValueName = 'CodexFirstBoot'
 $dockerDesktopRunKeyPath = 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run'
 $dockerDesktopRunValueName = 'DockerDesktopAutoStart'
+$timingFilePath = Join-Path $baseDir 'install-timing.json'
+$timingHelperPath = Join-Path $baseDir 'Update-InstallTiming.ps1'
 
 function Write-Log {
     param(
@@ -39,6 +41,40 @@ function Remove-RunRegistration {
 function Complete-FirstBootSetup {
     New-Item -ItemType File -Path $markerPath -Force | Out-Null
     Remove-RunRegistration
+}
+
+function Update-TimingState {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Phase,
+
+        [Parameter(Mandatory = $true)]
+        [ValidateSet('Start', 'Complete', 'Status')]
+        [string]$Event,
+
+        [string]$Status,
+        [string]$Result
+    )
+
+    if (-not (Get-Command Update-InstallTiming -ErrorAction SilentlyContinue)) {
+        return
+    }
+
+    $parameters = @{
+        TimingFilePath = $timingFilePath
+        Phase          = $Phase
+        Event          = $Event
+    }
+
+    if ($PSBoundParameters.ContainsKey('Status')) {
+        $parameters.Status = $Status
+    }
+
+    if ($PSBoundParameters.ContainsKey('Result')) {
+        $parameters.Result = $Result
+    }
+
+    Update-InstallTiming @parameters
 }
 
 function New-PayloadLogPath {
@@ -245,7 +281,12 @@ if (-not (Test-Path -LiteralPath $payloadLogsDir)) {
     New-Item -ItemType Directory -Path $payloadLogsDir -Force | Out-Null
 }
 
+if (Test-Path -LiteralPath $timingHelperPath) {
+    . $timingHelperPath
+}
+
 Write-Log -Level 'INFO' -Message 'First-logon setup started.'
+Update-TimingState -Phase 'first_logon' -Event Start
 
 if (Test-Path -LiteralPath $markerPath) {
     Write-Log -Level 'INFO' -Message 'Marker file already exists. Cleaning up Run registration and exiting.'
@@ -255,6 +296,10 @@ if (Test-Path -LiteralPath $markerPath) {
 
 if (-not (Test-Path -LiteralPath $dockerPayloadDir)) {
     Write-Log -Level 'INFO' -Message 'No payload directory exists at C:\Payload\DockerImages. Skipping setup.'
+    Update-TimingState -Phase 'payloads' -Event Start
+    Update-TimingState -Phase 'payloads' -Event Complete -Status 'skipped'
+    Update-TimingState -Phase 'first_logon' -Event Complete -Status 'success'
+    Update-TimingState -Phase 'overall' -Event Complete -Result 'success'
     Complete-FirstBootSetup
     exit 0
 }
@@ -262,6 +307,7 @@ if (-not (Test-Path -LiteralPath $dockerPayloadDir)) {
 $dockerExe = Resolve-DockerCommand
 if (-not $dockerExe) {
     Write-Log -Level 'WARNING' -Message 'docker.exe was not found. Setup will retry on the next logon.'
+    Update-TimingState -Phase 'first_logon' -Event Status -Status 'retry_pending'
     exit 1
 }
 
@@ -277,15 +323,18 @@ Start-DockerDesktopBackground -DockerExe $dockerExe -DockerDesktopPath $dockerDe
 
 if (-not (Wait-DockerDesktopProcess)) {
     Write-Log -Level 'WARNING' -Message 'Docker Desktop process did not appear after startup. Setup will retry on the next logon.'
+    Update-TimingState -Phase 'first_logon' -Event Status -Status 'retry_pending'
     exit 1
 }
 
 if (-not (Wait-DockerDaemonReadyShort -DockerExe $dockerExe)) {
     Write-Log -Level 'WARNING' -Message 'Docker Desktop process started but the Docker daemon never became ready. Setup will retry on the next logon.'
+    Update-TimingState -Phase 'first_logon' -Event Status -Status 'retry_pending'
     exit 1
 }
 
 $payloadFailed = $false
+Update-TimingState -Phase 'payloads' -Event Start
 
 $loadImagesScript = Join-Path $dockerPayloadDir 'load_images.bat'
 if (Test-Path -LiteralPath $loadImagesScript) {
@@ -304,9 +353,14 @@ if (Test-Path -LiteralPath $appstoreScript) {
 
 if ($payloadFailed) {
     Write-Log -Level 'WARNING' -Message 'One or more payload scripts failed. Setup will retry on the next logon.'
+    Update-TimingState -Phase 'payloads' -Event Status -Status 'retry_pending'
+    Update-TimingState -Phase 'first_logon' -Event Status -Status 'retry_pending'
     exit 1
 }
 
+Update-TimingState -Phase 'payloads' -Event Complete -Status 'success'
+Update-TimingState -Phase 'first_logon' -Event Complete -Status 'success'
+Update-TimingState -Phase 'overall' -Event Complete -Result 'success'
 Complete-FirstBootSetup
 Write-Log -Level 'INFO' -Message 'Payload setup completed successfully.'
 exit 0

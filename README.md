@@ -57,6 +57,7 @@ This repository builds a reusable UEFI-only WinPE deployment environment for app
   - Ensures Docker is present and ready.
   - Starts Docker Desktop in the background with `docker desktop start` for the current first-logon run.
   - Executes `load_images.bat` and `install_appstore.bat` if they exist in `C:\Payload\DockerImages`.
+  - Updates `C:\ProgramData\FirstBoot\install-timing.json` with end-to-end install timing and per-phase durations.
   - Writes payload logs to `C:\ProgramData\FirstBoot\PayloadLogs\`.
   - Removes the Run registration only after Docker is ready and all detected payload scripts return exit code `0`.
 
@@ -238,5 +239,12 @@ C:\Windows\Setup\Scripts\SetupComplete.cmd
   - `C:\ProgramData\FirstBoot\setupcomplete.log`
   - `C:\ProgramData\FirstBoot\register-firstboot.log`
   - `C:\ProgramData\FirstBoot\firstboot.log`
+  - `C:\ProgramData\FirstBoot\install-timing.json`
   - `C:\ProgramData\FirstBoot\PayloadLogs\load_images_<timestamp>.log`
   - `C:\ProgramData\FirstBoot\PayloadLogs\install_appstore_<timestamp>.log`
+
+`install-timing.json` records:
+
+- overall install start/completion timestamps
+- total install duration in seconds
+- per-phase timing for `deploy`, `setup_complete`, `first_logon`, and `payloads`

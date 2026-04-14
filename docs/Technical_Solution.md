@@ -104,10 +104,27 @@ C:\Windows\Setup\Scripts\SetupComplete.cmd
   - `C:\ProgramData\FirstBoot\setupcomplete.log`
   - `C:\ProgramData\FirstBoot\register-firstboot.log`
   - `C:\ProgramData\FirstBoot\firstboot.log`
+  - `C:\ProgramData\FirstBoot\install-timing.json`
   - `C:\ProgramData\FirstBoot\PayloadLogs\load_images_<timestamp>.log`
   - `C:\ProgramData\FirstBoot\PayloadLogs\install_appstore_<timestamp>.log`
 
 其中 `install_appstore.bat` 的用户名和密码只在控制台显示，不写入持久化日志。
+
+### 5.1 安装时间统计
+
+`install-timing.json` 是安装时长统计的统一输出文件，覆盖以下阶段：
+
+- `deploy`
+- `setup_complete`
+- `first_logon`
+- `payloads`
+
+该文件同时记录：
+
+- 整体安装开始时间
+- 整体安装完成时间
+- 总耗时（秒）
+- 各阶段开始时间、完成时间、耗时与状态
 
 ## 6. 风险与约束
 

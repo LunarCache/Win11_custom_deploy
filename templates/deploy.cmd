@@ -18,6 +18,8 @@ rem X: is the RAM disk used by WinPE, so it is a safe place for transient logs a
 set "LOG=X:\AutoDeploy.log"
 set "SCRIPT_DIR=%~dp0"
 set "DEPLOYED_OS_LOG=W:\Windows\Temp\AutoDeploy.log"
+set "WINPE_TIMING_FILE=X:\install-timing.json"
+set "DEPLOYED_OS_TIMING_FILE=W:\ProgramData\FirstBoot\install-timing.json"
 set "MEDIA_LOG_DIR="
 
 rem The marker file prevents accidental use of an unrelated install.wim found on another volume.
@@ -38,6 +40,8 @@ set "DEPLOYMENT_WARNINGS=0"
 
 call :log_info "Configured target disk: %TARGET_DISK%"
 call :log_info "Configured WIM index: %WIM_INDEX%"
+call :timing_update "%WINPE_TIMING_FILE%" overall Start
+call :timing_update "%WINPE_TIMING_FILE%" deploy Start
 
 rem Source discovery is intentionally strict: zero or multiple matches both stop the deployment.
 call :scan_sources
@@ -114,6 +118,7 @@ if "!DEPLOYMENT_WARNINGS!"=="1" (
 ) else (
     call :log_info "Deployment completed successfully with no warnings."
 )
+call :timing_update "%WINPE_TIMING_FILE%" deploy Complete success
 call :log_info "The system will reboot now."
 call :persist_logs
 wpeutil reboot
@@ -163,6 +168,11 @@ if not exist "!SCRIPT_DIR!SetupComplete.cmd" (
     exit /b 2
 )
 
+if not exist "!SCRIPT_DIR!Update-InstallTiming.ps1" (
+    call :log_warning "Missing Update-InstallTiming.ps1 in WinPE runtime. Timing summary will not be available."
+    exit /b 2
+)
+
 copy /y "!SCRIPT_DIR!firstboot.ps1" "W:\ProgramData\FirstBoot\firstboot.ps1" >> "%LOG%" 2>&1
 if errorlevel 1 (
     call :log_warning "Failed to stage firstboot.ps1 into the deployed OS."
@@ -178,6 +188,18 @@ if errorlevel 1 (
 copy /y "!SCRIPT_DIR!SetupComplete.cmd" "W:\Windows\Setup\Scripts\SetupComplete.cmd" >> "%LOG%" 2>&1
 if errorlevel 1 (
     call :log_warning "Failed to stage SetupComplete.cmd into the deployed OS."
+    exit /b 2
+)
+
+copy /y "!SCRIPT_DIR!Update-InstallTiming.ps1" "W:\ProgramData\FirstBoot\Update-InstallTiming.ps1" >> "%LOG%" 2>&1
+if errorlevel 1 (
+    call :log_warning "Failed to stage Update-InstallTiming.ps1 into the deployed OS."
+    exit /b 2
+)
+
+copy /y "%WINPE_TIMING_FILE%" "%DEPLOYED_OS_TIMING_FILE%" >> "%LOG%" 2>&1
+if errorlevel 1 (
+    call :log_warning "Failed to stage install-timing.json into the deployed OS."
     exit /b 2
 )
 
@@ -213,11 +235,14 @@ rem Preserve the WinPE RAM-disk log anywhere durable that is currently available
 if exist "W:\Windows" (
     if not exist "W:\Windows\Temp" md W:\Windows\Temp >nul 2>&1
     copy /y "%LOG%" "!DEPLOYED_OS_LOG!" >nul 2>&1
+    if not exist "W:\ProgramData\FirstBoot" md W:\ProgramData\FirstBoot >nul 2>&1
+    copy /y "%WINPE_TIMING_FILE%" "%DEPLOYED_OS_TIMING_FILE%" >nul 2>&1
 )
 
 if defined MEDIA_LOG_DIR (
     if not exist "!MEDIA_LOG_DIR!" md "!MEDIA_LOG_DIR!" >nul 2>&1
     copy /y "%LOG%" "!MEDIA_LOG_DIR!\AutoDeploy.log" >nul 2>&1
+    copy /y "%WINPE_TIMING_FILE%" "!MEDIA_LOG_DIR!\install-timing.json" >nul 2>&1
 )
 exit /b 0
 
@@ -270,6 +295,8 @@ echo [%DATE% %TIME%] [%~1] %~2
 exit /b 0
 
 :fail
+call :timing_update "%WINPE_TIMING_FILE%" deploy Complete failed
+call :timing_update "%WINPE_TIMING_FILE%" overall Complete "" failed
 call :log_error "%~1"
 call :persist_logs
 echo.
@@ -277,3 +304,26 @@ echo ERROR: %~1
 echo See %LOG% for details.
 pause
 exit /b 1
+
+:timing_update
+if not exist "!SCRIPT_DIR!Update-InstallTiming.ps1" exit /b 0
+set "TIMING_PATH=%~1"
+set "TIMING_PHASE=%~2"
+set "TIMING_EVENT=%~3"
+set "TIMING_STATUS=%~4"
+set "TIMING_RESULT=%~5"
+
+if defined TIMING_STATUS (
+    if defined TIMING_RESULT (
+        "%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "!SCRIPT_DIR!Update-InstallTiming.ps1" -TimingFilePath "!TIMING_PATH!" -Phase "!TIMING_PHASE!" -Event "!TIMING_EVENT!" -Status "!TIMING_STATUS!" -Result "!TIMING_RESULT!" >> "%LOG%" 2>&1
+    ) else (
+        "%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "!SCRIPT_DIR!Update-InstallTiming.ps1" -TimingFilePath "!TIMING_PATH!" -Phase "!TIMING_PHASE!" -Event "!TIMING_EVENT!" -Status "!TIMING_STATUS!" >> "%LOG%" 2>&1
+    )
+) else (
+    if defined TIMING_RESULT (
+        "%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "!SCRIPT_DIR!Update-InstallTiming.ps1" -TimingFilePath "!TIMING_PATH!" -Phase "!TIMING_PHASE!" -Event "!TIMING_EVENT!" -Result "!TIMING_RESULT!" >> "%LOG%" 2>&1
+    ) else (
+        "%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "!SCRIPT_DIR!Update-InstallTiming.ps1" -TimingFilePath "!TIMING_PATH!" -Phase "!TIMING_PHASE!" -Event "!TIMING_EVENT!" >> "%LOG%" 2>&1
+    )
+)
+exit /b 0
