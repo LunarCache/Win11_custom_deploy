@@ -124,12 +124,7 @@ function Invoke-PayloadScript {
     Write-Log -Level 'INFO' -Message ("Payload log path: {0}" -f $payloadLogPath)
 
     try {
-        $commandLine = if ($VisibleWindow) {
-            'call "{0}" "{1}"' -f $ScriptPath, $payloadLogPath
-        }
-        else {
-            'call "{0}" >> "{1}" 2>>&1' -f $ScriptPath, $payloadLogPath
-        }
+        $commandLine = 'call "{0}" "{1}"' -f $ScriptPath, $payloadLogPath
 
         $startProcessArgs = @{
             FilePath   = 'cmd.exe'

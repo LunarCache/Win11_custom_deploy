@@ -107,7 +107,7 @@ Main responsibilities:
 - If Docker becomes ready, it executes:
   - `load_images.bat`
   - `install_appstore.bat`
-- `load_images.bat` is captured to its own payload log.
+- `load_images.bat` uses the same per-script payload logging format as `install_appstore.bat`.
 - `install_appstore.bat` keeps a visible console window, writes non-sensitive details to its own payload log, only shows the final credentials in the console window, and leaves the window open after success.
 - It creates `done.tag` and removes the Run entry only when all detected payload scripts return exit code `0`.
 

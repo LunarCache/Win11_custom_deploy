@@ -261,7 +261,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\ProgramData\FirstBoot
 10. Docker 就绪后，按存在性执行：
    - `load_images.bat`
    - `install_appstore.bat`
-11. `load_images.bat` 通过调用层隐藏执行，标准输出和标准错误写入独立 payload 日志
+11. `load_images.bat` 通过统一的批处理日志辅助函数隐藏执行，并按与 `install_appstore.bat` 相同的格式写入独立 payload 日志
 12. `install_appstore.bat` 保持可见控制台窗口，非敏感执行细节写入独立 payload 日志，最终用户名与密码只显示在控制台，且成功后窗口不会立即关闭
 13. 仅当所有已发现的 payload 脚本都返回 `0` 时才创建 `done.tag`
 14. 仅在上述成功条件满足时删除 Run 注册

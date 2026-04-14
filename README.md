@@ -185,7 +185,7 @@ After Windows boots:
   - If Docker becomes ready, it executes:
     - `C:\Payload\DockerImages\load_images.bat` when present
     - `C:\Payload\DockerImages\install_appstore.bat` when present
-  - `load_images.bat` runs hidden and writes its output to `C:\ProgramData\FirstBoot\PayloadLogs\load_images_<timestamp>.log`.
+  - `load_images.bat` runs hidden, uses the same payload logging format as `install_appstore.bat`, and writes its execution details to `C:\ProgramData\FirstBoot\PayloadLogs\load_images_<timestamp>.log`.
   - `install_appstore.bat` runs in a visible console window, writes non-sensitive execution details to `C:\ProgramData\FirstBoot\PayloadLogs\install_appstore_<timestamp>.log`, shows the final username/password only in the console window, and keeps that window open after success.
   - It creates `C:\ProgramData\FirstBoot\done.tag` and removes the Run entry only if all detected payload scripts succeed.
 
