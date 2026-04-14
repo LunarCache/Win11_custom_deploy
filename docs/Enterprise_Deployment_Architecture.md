@@ -253,18 +253,20 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\ProgramData\FirstBoot
    - 删除 Run 注册
    - 正常退出
 6. 查找 `docker.exe`
-7. 如果 Docker Desktop 存在且未运行，尝试启动 GUI
-8. 尝试启动：
-   - `com.docker.service`
-   - `docker`
-9. 最多执行 30 次 `docker info` 探测，每次间隔 10 秒
-10. Docker 就绪后，按存在性执行：
+7. 定位 `Docker Desktop.exe`
+8. 向 `HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Run` 写入 `DockerDesktopAutoStart`
+9. 优先执行 `docker desktop start` 在后台启动 Docker Desktop
+10. 如有需要，回退到直接启动 `Docker Desktop.exe`
+11. 等待 `Docker Desktop` 进程出现
+12. 启动 `com.docker.service` / `docker` 等相关服务（若存在）
+13. 通过短窗口 `docker info` 探测确认 daemon 已就绪
+14. Docker 就绪后，按存在性执行：
    - `load_images.bat`
    - `install_appstore.bat`
-11. `load_images.bat` 通过统一的批处理日志辅助函数隐藏执行，并按与 `install_appstore.bat` 相同的格式写入独立 payload 日志
-12. `install_appstore.bat` 保持可见控制台窗口，非敏感执行细节写入独立 payload 日志，最终用户名与密码只显示在控制台，且成功后窗口不会立即关闭
-13. 仅当所有已发现的 payload 脚本都返回 `0` 时才创建 `done.tag`
-14. 仅在上述成功条件满足时删除 Run 注册
+15. `load_images.bat` 通过统一的批处理日志辅助函数隐藏执行，并按与 `install_appstore.bat` 相同的格式写入独立 payload 日志
+16. `install_appstore.bat` 保持可见控制台窗口，非敏感执行细节写入独立 payload 日志，最终用户名与密码只显示在控制台，且成功后窗口不会立即关闭
+17. 仅当所有已发现的 payload 脚本都返回 `0` 时才创建 `done.tag`
+18. 仅在上述成功条件满足时删除 Run 注册
 
 ### 5.4 真实的重试语义
 

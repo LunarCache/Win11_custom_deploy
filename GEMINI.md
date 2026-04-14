@@ -103,7 +103,9 @@ Main responsibilities:
 - Writes per-script payload logs to `C:\ProgramData\FirstBoot\PayloadLogs`.
 - If `C:\Payload\DockerImages` does not exist, it marks completion and unregisters itself.
 - If `docker.exe` is missing, it exits with code `1` so Windows runs it again at the next logon.
-- If Docker is installed but not ready, it tries to start Docker Desktop and related services, then retries `docker info` for up to 30 attempts.
+- If Docker Desktop is installed, it registers `HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Run\DockerDesktopAutoStart` for future auto-start.
+- For the current first-logon run, it starts Docker Desktop in the background with `docker desktop start`, falling back to `Docker Desktop.exe` when needed.
+- It waits for the `Docker Desktop` process to appear, then performs a short `docker info` readiness check.
 - If Docker becomes ready, it executes:
   - `load_images.bat`
   - `install_appstore.bat`

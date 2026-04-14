@@ -15,6 +15,8 @@ $markerPath = Join-Path $baseDir 'done.tag'
 $dockerPayloadDir = 'C:\Payload\DockerImages'
 $runKeyPath = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run'
 $runValueName = 'CodexFirstBoot'
+$dockerDesktopRunKeyPath = 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run'
+$dockerDesktopRunValueName = 'DockerDesktopAutoStart'
 
 function Write-Log {
     param(
@@ -34,7 +36,7 @@ function Remove-RunRegistration {
     Remove-ItemProperty -Path $runKeyPath -Name $runValueName -ErrorAction SilentlyContinue
 }
 
-function Mark-Completed {
+function Complete-FirstBootSetup {
     New-Item -ItemType File -Path $markerPath -Force | Out-Null
     Remove-RunRegistration
 }
@@ -64,21 +66,98 @@ function Resolve-DockerCommand {
     return $null
 }
 
-function Wait-DockerReady {
+function Resolve-DockerDesktopGuiPath {
+    $candidatePaths = @(
+        'C:\Program Files\Docker\Docker\Docker Desktop.exe'
+    )
+
+    foreach ($candidatePath in $candidatePaths) {
+        if (Test-Path -LiteralPath $candidatePath -PathType Leaf) {
+            return $candidatePath
+        }
+    }
+
+    return $null
+}
+
+function Set-DockerDesktopAutoStart {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$DockerDesktopPath
+    )
+
+    $runCommand = '"{0}"' -f $DockerDesktopPath
+    New-Item -Path $dockerDesktopRunKeyPath -Force | Out-Null
+
+    $currentValue = $null
+    try {
+        $currentValue = (Get-ItemProperty -Path $dockerDesktopRunKeyPath -Name $dockerDesktopRunValueName -ErrorAction Stop).$dockerDesktopRunValueName
+    }
+    catch {
+        $currentValue = $null
+    }
+
+    if ($currentValue -ne $runCommand) {
+        Set-ItemProperty -Path $dockerDesktopRunKeyPath -Name $dockerDesktopRunValueName -Value $runCommand
+        Write-Log -Level 'INFO' -Message ("Configured Docker Desktop auto-start in HKCU Run: {0}" -f $runCommand)
+    }
+    else {
+        Write-Log -Level 'INFO' -Message 'Docker Desktop auto-start is already configured in HKCU Run.'
+    }
+}
+
+function Start-DockerDesktopBackground {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$DockerExe,
+
+        [Parameter()]
+        [string]$DockerDesktopPath
+    )
+
+    try {
+        Write-Log -Level 'INFO' -Message 'Starting Docker Desktop with "docker desktop start"...'
+        & $DockerExe desktop start *> $null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Log -Level 'INFO' -Message '"docker desktop start" returned exit code 0.'
+            return
+        }
+
+        Write-Log -Level 'WARNING' -Message ('"docker desktop start" returned exit code {0}. Falling back to direct process start.' -f $LASTEXITCODE)
+    }
+    catch {
+        Write-Log -Level 'WARNING' -Message ('Failed to execute "docker desktop start": {0}. Falling back to direct process start.' -f $_.Exception.Message)
+    }
+
+    if ($DockerDesktopPath) {
+        Write-Log -Level 'INFO' -Message ("Starting Docker Desktop directly: {0}" -f $DockerDesktopPath)
+        Start-Process -FilePath $DockerDesktopPath -WindowStyle Hidden
+    }
+    else {
+        Write-Log -Level 'WARNING' -Message 'Docker Desktop executable was not found for direct fallback start.'
+    }
+}
+
+function Wait-DockerDesktopProcess {
+    for ($attempt = 1; $attempt -le 10; $attempt++) {
+        $desktopProcess = Get-Process -Name 'Docker Desktop' -ErrorAction SilentlyContinue
+        if ($desktopProcess) {
+            Write-Log -Level 'INFO' -Message ("Docker Desktop process detected on attempt {0}/10." -f $attempt)
+            return $true
+        }
+
+        Write-Log -Level 'INFO' -Message ("Docker Desktop process not detected yet (attempt {0}/10). Waiting 2 seconds." -f $attempt)
+        Start-Sleep -Seconds 2
+    }
+
+    return $false
+}
+
+function Wait-DockerDaemonReadyShort {
     param(
         [Parameter(Mandatory = $true)]
         [string]$DockerExe
     )
-
-    # If Docker Desktop is installed, ensure the GUI is running to trigger daemon initialization.
-    $dockerDesktopPath = 'C:\Program Files\Docker\Docker\Docker Desktop.exe'
-    if (Test-Path -LiteralPath $dockerDesktopPath) {
-        $desktopProcess = Get-Process -Name 'Docker Desktop' -ErrorAction SilentlyContinue
-        if (-not $desktopProcess) {
-            Write-Log -Level 'INFO' -Message 'Starting Docker Desktop GUI...'
-            Start-Process -FilePath $dockerDesktopPath
-        }
-    }
 
     foreach ($serviceName in @('com.docker.service', 'docker')) {
         try {
@@ -93,14 +172,17 @@ function Wait-DockerReady {
         }
     }
 
-    for ($attempt = 1; $attempt -le 30; $attempt++) {
+    $waitScheduleSeconds = @(2, 2, 3, 5, 8, 8)
+    for ($attempt = 0; $attempt -lt $waitScheduleSeconds.Count; $attempt++) {
         & $DockerExe info *> $null
         if ($LASTEXITCODE -eq 0) {
+            Write-Log -Level 'INFO' -Message ("Docker daemon became ready on attempt {0}/{1}." -f ($attempt + 1), $waitScheduleSeconds.Count)
             return $true
         }
 
-        Write-Log -Level 'INFO' -Message ("Docker daemon not ready yet (attempt {0}/30). Waiting 10 seconds." -f $attempt)
-        Start-Sleep -Seconds 10
+        $waitSeconds = $waitScheduleSeconds[$attempt]
+        Write-Log -Level 'INFO' -Message ("Docker daemon not ready yet (attempt {0}/{1}). Waiting {2} seconds." -f ($attempt + 1), $waitScheduleSeconds.Count, $waitSeconds)
+        Start-Sleep -Seconds $waitSeconds
     }
 
     return $false
@@ -173,7 +255,7 @@ if (Test-Path -LiteralPath $markerPath) {
 
 if (-not (Test-Path -LiteralPath $dockerPayloadDir)) {
     Write-Log -Level 'INFO' -Message 'No payload directory exists at C:\Payload\DockerImages. Skipping setup.'
-    Mark-Completed
+    Complete-FirstBootSetup
     exit 0
 }
 
@@ -183,8 +265,23 @@ if (-not $dockerExe) {
     exit 1
 }
 
-if (-not (Wait-DockerReady -DockerExe $dockerExe)) {
-    Write-Log -Level 'WARNING' -Message 'Docker daemon never became ready. Setup will retry on the next logon.'
+$dockerDesktopPath = Resolve-DockerDesktopGuiPath
+if ($dockerDesktopPath) {
+    Set-DockerDesktopAutoStart -DockerDesktopPath $dockerDesktopPath
+}
+else {
+    Write-Log -Level 'WARNING' -Message 'Docker Desktop executable was not found. Auto-start registration was skipped.'
+}
+
+Start-DockerDesktopBackground -DockerExe $dockerExe -DockerDesktopPath $dockerDesktopPath
+
+if (-not (Wait-DockerDesktopProcess)) {
+    Write-Log -Level 'WARNING' -Message 'Docker Desktop process did not appear after startup. Setup will retry on the next logon.'
+    exit 1
+}
+
+if (-not (Wait-DockerDaemonReadyShort -DockerExe $dockerExe)) {
+    Write-Log -Level 'WARNING' -Message 'Docker Desktop process started but the Docker daemon never became ready. Setup will retry on the next logon.'
     exit 1
 }
 
@@ -210,6 +307,6 @@ if ($payloadFailed) {
     exit 1
 }
 
-Mark-Completed
+Complete-FirstBootSetup
 Write-Log -Level 'INFO' -Message 'Payload setup completed successfully.'
 exit 0

@@ -53,7 +53,9 @@ This repository builds a reusable UEFI-only WinPE deployment environment for app
   - Registers `firstboot.ps1` through `register-firstboot.ps1`.
 - `templates\firstboot.ps1`
   - Runs on user logon from `HKLM\...\Run`.
+  - Registers `HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Run\DockerDesktopAutoStart` for future Docker Desktop auto-start.
   - Ensures Docker is present and ready.
+  - Starts Docker Desktop in the background with `docker desktop start` for the current first-logon run.
   - Executes `load_images.bat` and `install_appstore.bat` if they exist in `C:\Payload\DockerImages`.
   - Writes payload logs to `C:\ProgramData\FirstBoot\PayloadLogs\`.
   - Removes the Run registration only after Docker is ready and all detected payload scripts return exit code `0`.
@@ -181,7 +183,9 @@ After Windows boots:
 - `firstboot.ps1` runs on the first successful user logon and behaves as follows:
   - If `C:\Payload\DockerImages` does not exist, it writes `done.tag`, removes the Run entry, and exits.
   - If `docker.exe` is missing, it exits with code `1` so the Run entry remains for the next logon.
-  - If Docker is installed but not ready, it tries to start Docker Desktop and related services, then retries `docker info` for up to 30 attempts with 10-second waits.
+  - If Docker Desktop is installed, it registers a per-user auto-start Run entry for future logons.
+  - It starts Docker Desktop in the background with `docker desktop start`, falls back to launching `Docker Desktop.exe` directly when needed, then waits for the `Docker Desktop` process to appear.
+  - After the process appears, it performs a short `docker info` readiness check before running any payload script.
   - If Docker becomes ready, it executes:
     - `C:\Payload\DockerImages\load_images.bat` when present
     - `C:\Payload\DockerImages\install_appstore.bat` when present
