@@ -12,7 +12,7 @@ $baseDir = 'C:\ProgramData\FirstBoot'
 $logPath = Join-Path $baseDir 'register-firstboot.log'
 $runKeyPath = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run'
 $runValueName = 'CodexFirstBoot'
-$runCommand = '"{0}" -NoProfile -ExecutionPolicy Bypass -File "{1}"' -f `
+$hiddenRunCommand = '"{0}" -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "{1}"' -f `
     "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe", `
     (Join-Path $baseDir 'firstboot.ps1')
 
@@ -37,7 +37,7 @@ if (-not (Test-Path -LiteralPath $baseDir)) {
 Write-Log -Level 'INFO' -Message 'Registering first-logon Docker payload importer.'
 
 New-Item -Path $runKeyPath -Force | Out-Null
-Set-ItemProperty -Path $runKeyPath -Name $runValueName -Value $runCommand
+Set-ItemProperty -Path $runKeyPath -Name $runValueName -Value $hiddenRunCommand
 
 Write-Log -Level 'INFO' -Message ("Registered HKLM Run entry {0}." -f $runValueName)
 exit 0

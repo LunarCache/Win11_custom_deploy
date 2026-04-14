@@ -57,7 +57,6 @@ This repository builds a reusable UEFI-only WinPE deployment environment for app
   - Ensures Docker is present and ready.
   - Starts Docker Desktop in the background with `docker desktop start` for the current first-logon run.
   - Executes `load_images.bat` and `install_appstore.bat` if they exist in `C:\Payload\DockerImages`.
-  - Updates `C:\ProgramData\FirstBoot\install-timing.json` with end-to-end install timing and per-phase durations.
   - Writes payload logs to `C:\ProgramData\FirstBoot\PayloadLogs\`.
   - Removes the Run registration only after Docker is ready and all detected payload scripts return exit code `0`.
 
@@ -191,7 +190,7 @@ After Windows boots:
     - `C:\Payload\DockerImages\load_images.bat` when present
     - `C:\Payload\DockerImages\install_appstore.bat` when present
   - `load_images.bat` runs hidden, uses the same payload logging format as `install_appstore.bat`, and writes its execution details to `C:\ProgramData\FirstBoot\PayloadLogs\load_images_<timestamp>.log`.
-  - `install_appstore.bat` runs in a visible console window, writes non-sensitive execution details to `C:\ProgramData\FirstBoot\PayloadLogs\install_appstore_<timestamp>.log`, shows the final username/password only in the console window, and keeps that window open after success.
+  - `install_appstore.bat` runs hidden, writes non-sensitive execution details to `C:\ProgramData\FirstBoot\PayloadLogs\install_appstore_<timestamp>.log`, opens a detached credential window after success, and opens a detached error window on failure.
   - It creates `C:\ProgramData\FirstBoot\done.tag` and removes the Run entry only if all detected payload scripts succeed.
 
 Important limitation:
@@ -239,12 +238,5 @@ C:\Windows\Setup\Scripts\SetupComplete.cmd
   - `C:\ProgramData\FirstBoot\setupcomplete.log`
   - `C:\ProgramData\FirstBoot\register-firstboot.log`
   - `C:\ProgramData\FirstBoot\firstboot.log`
-  - `C:\ProgramData\FirstBoot\install-timing.json`
   - `C:\ProgramData\FirstBoot\PayloadLogs\load_images_<timestamp>.log`
   - `C:\ProgramData\FirstBoot\PayloadLogs\install_appstore_<timestamp>.log`
-
-`install-timing.json` records:
-
-- overall install start/completion timestamps
-- total install duration in seconds
-- per-phase timing for `deploy`, `setup_complete`, `first_logon`, and `payloads`

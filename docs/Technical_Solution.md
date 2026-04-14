@@ -1,76 +1,49 @@
-# WinPE Auto Deploy 技术方案
+# WinPE Auto Deploy Technical Solution
 
-## 1. 方案目标
+## 1. Objective
 
-本方案用于构建一个基于 WinPE 的 Windows 11 自动部署体系，覆盖以下能力：
+This repository provides a Windows 11 deployment solution based on WinPE. It automates image discovery, disk partitioning, OS application, first-boot preparation, and first-logon Docker payload execution for UEFI `amd64` targets.
 
-- 基于 Windows ADK 生成可复用的 WinPE 工作目录
-- 将仓库内的自动化脚本和模板注入 `boot.wim`
-- 从部署介质自动发现唯一合法的 `install.wim` 源
-- 自动清空目标磁盘、重建 GPT 分区、应用系统镜像并重建引导
-- 在系统首次登录阶段执行 Docker 初始化和业务载荷脚本
+The design target is a controlled deployment flow with one prepared image source and an optional post-logon Docker payload bundle.
 
-该方案面向 `amd64 + UEFI` 场景，不覆盖 Legacy BIOS 与多镜像源自动择优。
+## 2. End-to-End Flow
 
-## 2. 总体架构
+The solution is divided into three runtime stages:
 
-整体分为三个阶段：
+1. Build stage  
+   `Build-WinPEAutoDeploy.ps1` creates a reusable WinPE work directory and injects repository templates into `boot.wim`.
 
-1. 构建阶段  
-   使用 `Build-WinPEAutoDeploy.ps1` 生成 WinPE 工作目录，并将 `deploy.cmd`、`unattend.xml`、`SetupComplete.cmd`、`firstboot.ps1` 等文件写入 `boot.wim`。
+2. Deployment stage  
+   After the target machine boots into WinPE, `startnet.cmd` launches `deploy.cmd`. The script discovers the deployment media, wipes the target disk, applies `install.wim`, configures boot files, stages OOBE and first-boot assets, and reboots.
 
-2. 部署阶段  
-   目标机启动进入 WinPE 后，由 `startnet.cmd` 调用 `deploy.cmd`，完成镜像源扫描、磁盘分区、系统应用、WinRE 配置和文件下发。
+3. First-logon stage  
+   `SetupComplete.cmd` enables WinRE and registers `CodexFirstBoot`. On the first successful user logon, `firstboot.ps1` starts Docker Desktop, waits for the daemon to become ready, and then runs the payload scripts.
 
-3. 首次登录阶段  
-   进入已部署系统后，`SetupComplete.cmd` 注册 `CodexFirstBoot`，`firstboot.ps1` 在用户登录时启动 Docker Desktop、等待 daemon 就绪，并执行 `load_images.bat` 与 `install_appstore.bat`。
+## 3. Key Components
 
-## 3. 关键组件职责
+### 3.1 Build and Media Preparation
 
-### 3.1 构建与介质生成
+- `scripts/Build-WinPEAutoDeploy.ps1` builds the customized WinPE work directory and renders template tokens such as `__TARGET_DISK__` and `__WIM_INDEX__`.
+- `scripts/Prepare-WinPEUsb.ps1` prepares the dual-partition USB media and copies `install.wim` plus optional Docker payload files.
+- `scripts/Generate-WinPEIso.ps1` packages the customized media into an ISO for VM or physical-machine testing.
 
-- `scripts/Build-WinPEAutoDeploy.ps1`  
-  负责创建 WinPE 工作目录、挂载 `boot.wim`、渲染模板令牌并注入运行时文件。
+### 3.2 WinPE Runtime
 
-- `scripts/Prepare-WinPEUsb.ps1`  
-  负责制作双分区部署 U 盘：FAT32 启动分区 + NTFS 镜像分区。
+- `templates/startnet.cmd` initializes WinPE and transfers control to `deploy.cmd`.
+- `templates/deploy.cmd` performs source discovery, GPT partitioning, image apply, BCDBoot, WinRE path configuration, log preservation, and first-boot asset staging.
+- `templates/unattend.xml` preconfigures language settings and skips only the network page in OOBE.
 
-- `scripts/Generate-WinPEIso.ps1`  
-  负责将现有工作目录打包成 ISO，可选注入 `install.wim` 与 payload。
+### 3.3 First-Logon Automation
 
-### 3.2 WinPE 运行时
+- `templates/SetupComplete.cmd` enables WinRE in the deployed OS and registers the first-logon automation entry.
+- `templates/register-firstboot.ps1` creates `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Run\CodexFirstBoot`.
+- `templates/firstboot.ps1` registers Docker Desktop auto-start in `HKCU`, starts Docker Desktop for the current session, waits for the daemon to become ready, and runs:
+  - `C:\Payload\DockerImages\load_images.bat`
+  - `C:\Payload\DockerImages\install_appstore.bat`
 
-- `templates/startnet.cmd`  
-  作为 WinPE 启动入口，调用 `wpeinit` 后进入主部署脚本。
+## 4. Data Layout
 
-- `templates/deploy.cmd`  
-  作为核心部署引擎，完成源扫描、DiskPart 分区、`DISM /Apply-Image`、`BCDBoot`、WinRE 配置以及首登脚本下发。
-
-- `templates/unattend.xml`  
-  仅负责语言区域和 OOBE 网络页跳过，不承担完整无人值守安装逻辑。
-
-### 3.3 首次登录自动化
-
-- `templates/SetupComplete.cmd`  
-  在系统安装末期启用 WinRE，并注册 `register-firstboot.ps1`。
-
-- `templates/register-firstboot.ps1`  
-  在 `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Run` 下创建 `CodexFirstBoot`。
-
-- `templates/firstboot.ps1`  
-  首次登录时完成以下动作：
-  - 注册 `HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Run\DockerDesktopAutoStart`
-  - 优先执行 `docker desktop start`
-  - 必要时回退启动 `Docker Desktop.exe`
-  - 等待 `Docker Desktop` 进程出现
-  - 使用短窗口 `docker info` 检查 daemon 是否 ready
-  - 依次执行 `load_images.bat` 与 `install_appstore.bat`
-
-## 4. 数据与执行流
-
-### 4.1 部署介质输入
-
-部署介质最小结构如下：
+### 4.1 Deployment Media
 
 ```text
 \sources\install.wim
@@ -80,9 +53,7 @@
 \payload\docker-images\*.tar                    optional
 ```
 
-### 4.2 部署输出
-
-部署完成后，目标系统中会生成以下关键内容：
+### 4.2 Files Staged Into the Deployed OS
 
 ```text
 C:\Payload\DockerImages\...
@@ -91,56 +62,27 @@ C:\ProgramData\FirstBoot\register-firstboot.ps1
 C:\Windows\Setup\Scripts\SetupComplete.cmd
 ```
 
-## 5. 日志设计
+## 5. Logging
 
-日志分为两层：
+Deployment logs:
 
-- 部署日志  
-  - `X:\AutoDeploy.log`
-  - `C:\Windows\Temp\AutoDeploy.log`
-  - `\<deployment-media>\DeployLogs\AutoDeploy.log`
+- `X:\AutoDeploy.log`
+- `C:\Windows\Temp\AutoDeploy.log`
+- `\<deployment-media>\DeployLogs\AutoDeploy.log`
 
-- 首次登录日志  
-  - `C:\ProgramData\FirstBoot\setupcomplete.log`
-  - `C:\ProgramData\FirstBoot\register-firstboot.log`
-  - `C:\ProgramData\FirstBoot\firstboot.log`
-  - `C:\ProgramData\FirstBoot\install-timing.json`
-  - `C:\ProgramData\FirstBoot\PayloadLogs\load_images_<timestamp>.log`
-  - `C:\ProgramData\FirstBoot\PayloadLogs\install_appstore_<timestamp>.log`
+First-logon logs:
 
-其中 `install_appstore.bat` 的用户名和密码只在控制台显示，不写入持久化日志。
+- `C:\ProgramData\FirstBoot\setupcomplete.log`
+- `C:\ProgramData\FirstBoot\register-firstboot.log`
+- `C:\ProgramData\FirstBoot\firstboot.log`
+- `C:\ProgramData\FirstBoot\PayloadLogs\load_images_<timestamp>.log`
+- `C:\ProgramData\FirstBoot\PayloadLogs\install_appstore_<timestamp>.log`
 
-### 5.1 安装时间统计
+`install_appstore.bat` runs hidden during automation. After success, `firstboot.ps1` opens a detached credential window for the operator. On failure, the batch script opens a detached error window. Sensitive values are not persisted in the payload log.
 
-`install-timing.json` 是安装时长统计的统一输出文件，覆盖以下阶段：
+## 6. Constraints and Risks
 
-- `deploy`
-- `setup_complete`
-- `first_logon`
-- `payloads`
-
-该文件同时记录：
-
-- 整体安装开始时间
-- 整体安装完成时间
-- 总耗时（秒）
-- 各阶段开始时间、完成时间、耗时与状态
-
-## 6. 风险与约束
-
-- 部署脚本会清空目标磁盘，`Prepare-WinPEUsb.ps1` 会清空指定 U 盘。
-- 运行时只接受“恰好一个”合法镜像源，避免错误介质被误用。
-- 当前 Docker 自动化依赖 Docker Desktop，而不是独立的 Windows `dockerd` 服务方案。
-- payload 自动执行仍按固定文件名发现：`load_images.bat`、`install_appstore.bat`。
-
-## 7. 建议阅读顺序
-
-建议按以下顺序阅读代码和脚本：
-
-1. `scripts/Build-WinPEAutoDeploy.ps1`
-2. `templates/deploy.cmd`
-3. `templates/firstboot.ps1`
-4. `scripts/Prepare-WinPEUsb.ps1`
-5. `scripts/Generate-WinPEIso.ps1`
-
-这条顺序对应“构建 -> 部署 -> 首登自动化 -> 介质分发”的真实技术链路。
+- Both USB preparation and runtime deployment are destructive operations and wipe disks.
+- Source discovery intentionally accepts exactly one valid deployment source to reduce the risk of using the wrong image.
+- Docker automation depends on Docker Desktop rather than a standalone Windows `dockerd` service.
+- Payload discovery is filename-based and currently limited to `load_images.bat` and `install_appstore.bat`.

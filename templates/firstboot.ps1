@@ -17,8 +17,6 @@ $runKeyPath = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run'
 $runValueName = 'CodexFirstBoot'
 $dockerDesktopRunKeyPath = 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run'
 $dockerDesktopRunValueName = 'DockerDesktopAutoStart'
-$timingFilePath = Join-Path $baseDir 'install-timing.json'
-$timingHelperPath = Join-Path $baseDir 'Update-InstallTiming.ps1'
 
 function Write-Log {
     param(
@@ -41,40 +39,6 @@ function Remove-RunRegistration {
 function Complete-FirstBootSetup {
     New-Item -ItemType File -Path $markerPath -Force | Out-Null
     Remove-RunRegistration
-}
-
-function Update-TimingState {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$Phase,
-
-        [Parameter(Mandatory = $true)]
-        [ValidateSet('Start', 'Complete', 'Status')]
-        [string]$Event,
-
-        [string]$Status,
-        [string]$Result
-    )
-
-    if (-not (Get-Command Update-InstallTiming -ErrorAction SilentlyContinue)) {
-        return
-    }
-
-    $parameters = @{
-        TimingFilePath = $timingFilePath
-        Phase          = $Phase
-        Event          = $Event
-    }
-
-    if ($PSBoundParameters.ContainsKey('Status')) {
-        $parameters.Status = $Status
-    }
-
-    if ($PSBoundParameters.ContainsKey('Result')) {
-        $parameters.Result = $Result
-    }
-
-    Update-InstallTiming @parameters
 }
 
 function New-PayloadLogPath {
@@ -273,6 +237,77 @@ function Invoke-PayloadScript {
     }
 }
 
+function Get-1PanelCredentialInfo {
+    $credentialInfo = [ordered]@{
+        Url      = 'http://localhost:10086/entrance'
+        Username = 'admin'
+        Password = 'Cp@12345'
+    }
+
+    $composePath = 'C:\1Panel\docker-compose.yml'
+    if (-not (Test-Path -LiteralPath $composePath)) {
+        return $credentialInfo
+    }
+
+    try {
+        foreach ($line in Get-Content -LiteralPath $composePath) {
+            if ($line -match '^\s*-\s*"?(?<hostPort>\d+):\d+"?\s*$') {
+                $credentialInfo.Url = 'http://localhost:{0}/entrance' -f $Matches.hostPort
+                continue
+            }
+
+            if ($line -match '^\s*-\s*PANEL_USERNAME=(?<value>.+)\s*$') {
+                $credentialInfo.Username = $Matches.value.Trim()
+                continue
+            }
+
+            if ($line -match '^\s*-\s*PANEL_PASSWORD=(?<value>.+)\s*$') {
+                $credentialInfo.Password = $Matches.value.Trim()
+                continue
+            }
+
+            if ($line -match '^\s*-\s*PANEL_ENTRANCE=(?<value>.+)\s*$') {
+                $entrance = $Matches.value.Trim()
+                $credentialInfo.Url = $credentialInfo.Url -replace '/[^/]*$', "/$entrance"
+            }
+        }
+    }
+    catch {
+        Write-Log -Level 'WARNING' -Message ("Failed to parse 1Panel credentials from docker-compose.yml: {0}" -f $_.Exception.Message)
+    }
+
+    return $credentialInfo
+}
+
+function Show-1PanelCredentialWindow {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Url,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Username,
+
+        [Parameter(Mandatory = $true)]
+        [string]$SecretValue
+    )
+
+    $commandLine = @(
+        'title 1Panel Credentials',
+        'echo ==================================================',
+        'echo.',
+        'echo    1Panel Installation Complete!',
+        ('echo    URL: {0}' -f $Url),
+        ('echo    Username: {0}' -f $Username),
+        ('echo    Password: {0}' -f $SecretValue),
+        'echo.',
+        'echo ==================================================',
+        'pause'
+    ) -join ' & '
+
+    Start-Process -FilePath 'cmd.exe' -ArgumentList @('/d', '/k', $commandLine) -WindowStyle Normal
+    Write-Log -Level 'INFO' -Message 'Opened detached 1Panel credential window.'
+}
+
 if (-not (Test-Path -LiteralPath $baseDir)) {
     New-Item -ItemType Directory -Path $baseDir -Force | Out-Null
 }
@@ -281,12 +316,7 @@ if (-not (Test-Path -LiteralPath $payloadLogsDir)) {
     New-Item -ItemType Directory -Path $payloadLogsDir -Force | Out-Null
 }
 
-if (Test-Path -LiteralPath $timingHelperPath) {
-    . $timingHelperPath
-}
-
 Write-Log -Level 'INFO' -Message 'First-logon setup started.'
-Update-TimingState -Phase 'first_logon' -Event Start
 
 if (Test-Path -LiteralPath $markerPath) {
     Write-Log -Level 'INFO' -Message 'Marker file already exists. Cleaning up Run registration and exiting.'
@@ -296,10 +326,6 @@ if (Test-Path -LiteralPath $markerPath) {
 
 if (-not (Test-Path -LiteralPath $dockerPayloadDir)) {
     Write-Log -Level 'INFO' -Message 'No payload directory exists at C:\Payload\DockerImages. Skipping setup.'
-    Update-TimingState -Phase 'payloads' -Event Start
-    Update-TimingState -Phase 'payloads' -Event Complete -Status 'skipped'
-    Update-TimingState -Phase 'first_logon' -Event Complete -Status 'success'
-    Update-TimingState -Phase 'overall' -Event Complete -Result 'success'
     Complete-FirstBootSetup
     exit 0
 }
@@ -307,7 +333,6 @@ if (-not (Test-Path -LiteralPath $dockerPayloadDir)) {
 $dockerExe = Resolve-DockerCommand
 if (-not $dockerExe) {
     Write-Log -Level 'WARNING' -Message 'docker.exe was not found. Setup will retry on the next logon.'
-    Update-TimingState -Phase 'first_logon' -Event Status -Status 'retry_pending'
     exit 1
 }
 
@@ -323,18 +348,15 @@ Start-DockerDesktopBackground -DockerExe $dockerExe -DockerDesktopPath $dockerDe
 
 if (-not (Wait-DockerDesktopProcess)) {
     Write-Log -Level 'WARNING' -Message 'Docker Desktop process did not appear after startup. Setup will retry on the next logon.'
-    Update-TimingState -Phase 'first_logon' -Event Status -Status 'retry_pending'
     exit 1
 }
 
 if (-not (Wait-DockerDaemonReadyShort -DockerExe $dockerExe)) {
     Write-Log -Level 'WARNING' -Message 'Docker Desktop process started but the Docker daemon never became ready. Setup will retry on the next logon.'
-    Update-TimingState -Phase 'first_logon' -Event Status -Status 'retry_pending'
     exit 1
 }
 
 $payloadFailed = $false
-Update-TimingState -Phase 'payloads' -Event Start
 
 $loadImagesScript = Join-Path $dockerPayloadDir 'load_images.bat'
 if (Test-Path -LiteralPath $loadImagesScript) {
@@ -344,23 +366,28 @@ if (Test-Path -LiteralPath $loadImagesScript) {
 }
 
 $appstoreScript = Join-Path $dockerPayloadDir 'install_appstore.bat'
+$appstoreSucceeded = $false
 if (Test-Path -LiteralPath $appstoreScript) {
-    # Start the batch script in a visible window so the user can see progress and the final 'pause'.
-    if (-not (Invoke-PayloadScript -ScriptPath $appstoreScript -DisplayName 'appstore setup script' -VisibleWindow)) {
+    # Run the installer hidden. On success we open a detached credential window, and
+    # on failure the batch script is responsible for opening its own detached error window.
+    if (-not (Invoke-PayloadScript -ScriptPath $appstoreScript -DisplayName 'appstore setup script')) {
         $payloadFailed = $true
+    }
+    else {
+        $appstoreSucceeded = $true
     }
 }
 
 if ($payloadFailed) {
     Write-Log -Level 'WARNING' -Message 'One or more payload scripts failed. Setup will retry on the next logon.'
-    Update-TimingState -Phase 'payloads' -Event Status -Status 'retry_pending'
-    Update-TimingState -Phase 'first_logon' -Event Status -Status 'retry_pending'
     exit 1
 }
 
-Update-TimingState -Phase 'payloads' -Event Complete -Status 'success'
-Update-TimingState -Phase 'first_logon' -Event Complete -Status 'success'
-Update-TimingState -Phase 'overall' -Event Complete -Result 'success'
+if ($appstoreSucceeded) {
+    $credentialInfo = Get-1PanelCredentialInfo
+    Show-1PanelCredentialWindow -Url $credentialInfo.Url -Username $credentialInfo.Username -SecretValue $credentialInfo.Password
+}
+
 Complete-FirstBootSetup
 Write-Log -Level 'INFO' -Message 'Payload setup completed successfully.'
 exit 0

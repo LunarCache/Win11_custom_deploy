@@ -85,8 +85,7 @@ foreach ($requiredTemplate in @(
     'startnet.cmd',
     'firstboot.ps1',
     'register-firstboot.ps1',
-    'SetupComplete.cmd',
-    'Update-InstallTiming.ps1'
+    'SetupComplete.cmd'
 )) {
     $templatePath = Join-Path $templatesDir $requiredTemplate
     if (-not (Test-Path -LiteralPath $templatePath)) {
@@ -158,7 +157,6 @@ try {
     Write-RenderedTemplate -TemplatePath (Join-Path $templatesDir 'firstboot.ps1') -DestinationPath (Join-Path $system32Dir 'firstboot.ps1')
     Write-RenderedTemplate -TemplatePath (Join-Path $templatesDir 'register-firstboot.ps1') -DestinationPath (Join-Path $system32Dir 'register-firstboot.ps1')
     Write-RenderedTemplate -TemplatePath (Join-Path $templatesDir 'SetupComplete.cmd') -DestinationPath (Join-Path $system32Dir 'SetupComplete.cmd')
-    Write-RenderedTemplate -TemplatePath (Join-Path $templatesDir 'Update-InstallTiming.ps1') -DestinationPath (Join-Path $system32Dir 'Update-InstallTiming.ps1')
     Write-RenderedTemplate -TemplatePath (Join-Path $templatesDir 'unattend.xml') -DestinationPath (Join-Path $system32Dir 'unattend.xml')
 
     $commitChanges = $true
