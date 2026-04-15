@@ -158,6 +158,11 @@ if not exist "!SCRIPT_DIR!register-firstboot.ps1" (
     exit /b 2
 )
 
+if not exist "!SCRIPT_DIR!firstboot-launcher.vbs" (
+    call :log_warning "Missing firstboot-launcher.vbs in WinPE runtime. Docker payload import will not be available."
+    exit /b 2
+)
+
 if not exist "!SCRIPT_DIR!SetupComplete.cmd" (
     call :log_warning "Missing SetupComplete.cmd in WinPE runtime. Docker payload import will not be available."
     exit /b 2
@@ -172,6 +177,12 @@ if errorlevel 1 (
 copy /y "!SCRIPT_DIR!register-firstboot.ps1" "W:\ProgramData\FirstBoot\register-firstboot.ps1" >> "%LOG%" 2>&1
 if errorlevel 1 (
     call :log_warning "Failed to stage register-firstboot.ps1 into the deployed OS."
+    exit /b 2
+)
+
+copy /y "!SCRIPT_DIR!firstboot-launcher.vbs" "W:\ProgramData\FirstBoot\firstboot-launcher.vbs" >> "%LOG%" 2>&1
+if errorlevel 1 (
+    call :log_warning "Failed to stage firstboot-launcher.vbs into the deployed OS."
     exit /b 2
 )
 

@@ -51,12 +51,15 @@ This repository builds a reusable UEFI-only WinPE deployment environment for app
 - `templates\SetupComplete.cmd`
   - Runs `reagentc /enable` inside the deployed OS.
   - Registers `firstboot.ps1` through `register-firstboot.ps1`.
+- `templates\firstboot-launcher.vbs`
+  - Launches `firstboot.ps1` through `wscript.exe` so logon does not show a blank console window.
 - `templates\firstboot.ps1`
   - Runs on user logon from `HKLM\...\Run`.
   - Registers `HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Run\DockerDesktopAutoStart` for future Docker Desktop auto-start.
   - Ensures Docker is present and ready.
   - Starts Docker Desktop in the background with `docker desktop start` for the current first-logon run.
-  - Executes `load_images.bat` and `install_appstore.bat` if they exist in `C:\Payload\DockerImages`.
+  - Scans ordered `NN-name` service directories under `C:\Payload\DockerImages`.
+  - Executes `load_images.bat` and `install_service.bat` when present in each service directory.
   - Writes payload logs to `C:\ProgramData\FirstBoot\PayloadLogs\`.
   - Removes the Run registration only after Docker is ready and all detected payload scripts return exit code `0`.
 
@@ -180,23 +183,28 @@ After Windows boots:
 
 - `SetupComplete.cmd` enables WinRE with `reagentc /enable`.
 - `register-firstboot.ps1` creates `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Run\CodexFirstBoot`.
+- `register-firstboot.ps1` points that Run entry at `wscript.exe` and `firstboot-launcher.vbs` so the hidden first-logon task does not flash an empty console.
 - `firstboot.ps1` runs on the first successful user logon and behaves as follows:
   - If `C:\Payload\DockerImages` does not exist, it writes `done.tag`, removes the Run entry, and exits.
+  - If `C:\Payload\DockerImages` exists but contains no ordered `NN-name` service directories, it writes `done.tag`, removes the Run entry, and exits.
   - If `docker.exe` is missing, it exits with code `1` so the Run entry remains for the next logon.
   - If Docker Desktop is installed, it registers a per-user auto-start Run entry for future logons.
   - It starts Docker Desktop in the background with `docker desktop start`, falls back to launching `Docker Desktop.exe` directly when needed, then waits for the `Docker Desktop` process to appear.
   - After the process appears, it performs a short `docker info` readiness check before running any payload script.
-  - If Docker becomes ready, it executes:
-    - `C:\Payload\DockerImages\load_images.bat` when present
-    - `C:\Payload\DockerImages\install_appstore.bat` when present
-  - `load_images.bat` runs hidden, uses the same payload logging format as `install_appstore.bat`, and writes its execution details to `C:\ProgramData\FirstBoot\PayloadLogs\load_images_<timestamp>.log`.
-  - `install_appstore.bat` runs hidden, writes non-sensitive execution details to `C:\ProgramData\FirstBoot\PayloadLogs\install_appstore_<timestamp>.log`, opens a detached credential window after success, and opens a detached error window on failure.
+  - If Docker becomes ready, it scans `C:\Payload\DockerImages\NN-name\` service directories in name order.
+  - For each service directory, it runs `load_images.bat` when present and `install_service.bat` when present.
+  - Payload logs are written to `C:\ProgramData\FirstBoot\PayloadLogs\<service>_<script>_<timestamp>.log`.
+  - `load_images.bat` and `install_service.bat` run in visible `cmd.exe` windows during first-logon automation and close automatically on success.
+  - Those visible payload windows now show a do-not-close notice because closing them interrupts the current payload step.
+  - `10-win11-install\install_service.bat` writes non-sensitive execution details to its payload log, opens a detached credential window after success, and opens a detached error window on failure.
+  - `20-CIKE-install\install_service.bat` opens a detached CIKE success window after success.
+  - Final success popups are detached windows and do not block or interrupt the first-logon flow from completing.
   - It creates `C:\ProgramData\FirstBoot\done.tag` and removes the Run entry only if all detected payload scripts succeed.
 
 Important limitation:
 
 - Retry behavior covers both Docker readiness failures and payload script failures.
-- Payload scripts are still discovered by fixed filenames only: `load_images.bat` and `install_appstore.bat`.
+- Payload services are discovered by ordered service directories and fixed script names: `load_images.bat` and `install_service.bat`.
 
 ## Payload layout
 
@@ -205,10 +213,12 @@ On deployment media:
 ```text
 \sources\install.wim
 \sources\winpe-autodeploy.tag
-\payload\docker-images\load_images.bat          optional
-\payload\docker-images\install_appstore.bat     optional
-\payload\docker-images\*.tar                    optional
-\payload\docker-images\<other files>            optional
+\payload\docker-images\10-win11-install\load_images.bat      optional
+\payload\docker-images\10-win11-install\install_service.bat  optional
+\payload\docker-images\20-CIKE-install\load_images.bat       optional
+\payload\docker-images\20-CIKE-install\install_service.bat   optional
+\payload\docker-images\<NN-name>\*.tar                        optional
+\payload\docker-images\<NN-name>\<other files>               optional
 ```
 
 Inside the deployed OS after staging:
@@ -238,5 +248,5 @@ C:\Windows\Setup\Scripts\SetupComplete.cmd
   - `C:\ProgramData\FirstBoot\setupcomplete.log`
   - `C:\ProgramData\FirstBoot\register-firstboot.log`
   - `C:\ProgramData\FirstBoot\firstboot.log`
-  - `C:\ProgramData\FirstBoot\PayloadLogs\load_images_<timestamp>.log`
-  - `C:\ProgramData\FirstBoot\PayloadLogs\install_appstore_<timestamp>.log`
+  - `C:\ProgramData\FirstBoot\PayloadLogs\<service>_load_images_<timestamp>.log`
+  - `C:\ProgramData\FirstBoot\PayloadLogs\<service>_install_service_<timestamp>.log`

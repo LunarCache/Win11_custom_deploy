@@ -6,7 +6,7 @@ Set-StrictMode -Version Latest
 
 # This script is staged into the deployed operating system and runs on user logon
 # until it completes successfully. Its job is to ensure the Docker daemon is ready
-# and then execute the payload setup script (e.g. install_appstore.bat).
+# and then execute ordered payload service directories under C:\Payload\DockerImages.
 
 $baseDir = 'C:\ProgramData\FirstBoot'
 $logPath = Join-Path $baseDir 'firstboot.log'
@@ -44,11 +44,18 @@ function Complete-FirstBootSetup {
 function New-PayloadLogPath {
     param(
         [Parameter(Mandatory = $true)]
-        [string]$ScriptPath
+        [string]$ScriptPath,
+
+        [Parameter()]
+        [string]$ServiceDirectoryName
     )
 
     $scriptName = [System.IO.Path]::GetFileNameWithoutExtension($ScriptPath)
     $timestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
+    if ($ServiceDirectoryName) {
+        return Join-Path $payloadLogsDir ('{0}_{1}_{2}.log' -f $ServiceDirectoryName, $scriptName, $timestamp)
+    }
+
     return Join-Path $payloadLogsDir ('{0}_{1}.log' -f $scriptName, $timestamp)
 }
 
@@ -196,10 +203,13 @@ function Invoke-PayloadScript {
         [Parameter(Mandatory = $true)]
         [string]$DisplayName,
 
+        [Parameter()]
+        [string]$ServiceDirectoryName,
+
         [switch]$VisibleWindow
     )
 
-    $payloadLogPath = New-PayloadLogPath -ScriptPath $ScriptPath
+    $payloadLogPath = New-PayloadLogPath -ScriptPath $ScriptPath -ServiceDirectoryName $ServiceDirectoryName
     New-Item -ItemType File -Path $payloadLogPath -Force | Out-Null
 
     Write-Log -Level 'INFO' -Message ("Executing {0}: {1}" -f $DisplayName, $ScriptPath)
@@ -235,6 +245,61 @@ function Invoke-PayloadScript {
         Write-Log -Level 'ERROR' -Message ("Failed to execute {0}: {1}. Intended payload log: {2}" -f $DisplayName, $_.Exception.Message, $payloadLogPath)
         return $false
     }
+}
+
+function Get-OrderedPayloadDirectories {
+    if (-not (Test-Path -LiteralPath $dockerPayloadDir -PathType Container)) {
+        return @()
+    }
+
+    return @(
+        Get-ChildItem -LiteralPath $dockerPayloadDir -Directory |
+            Where-Object { $_.Name -match '^\d{2}-.+' } |
+            Sort-Object -Property Name
+    )
+}
+
+function Invoke-PayloadService {
+    param(
+        [Parameter(Mandatory = $true)]
+        [System.IO.DirectoryInfo]$ServiceDirectory
+    )
+
+    Write-Log -Level 'INFO' -Message ("Starting payload service directory: {0}" -f $ServiceDirectory.Name)
+
+    $loadImagesScript = Join-Path $ServiceDirectory.FullName 'load_images.bat'
+    $installServiceScript = Join-Path $ServiceDirectory.FullName 'install_service.bat'
+
+    if (
+        -not (Test-Path -LiteralPath $loadImagesScript -PathType Leaf) -and
+        -not (Test-Path -LiteralPath $installServiceScript -PathType Leaf)
+    ) {
+        Write-Log -Level 'INFO' -Message ("Payload service directory {0} does not contain load_images.bat or install_service.bat. Skipping it." -f $ServiceDirectory.Name)
+        return $true
+    }
+
+    if (Test-Path -LiteralPath $loadImagesScript) {
+        if (-not (Invoke-PayloadScript -ScriptPath $loadImagesScript -DisplayName ("docker image load script ({0})" -f $ServiceDirectory.Name) -ServiceDirectoryName $ServiceDirectory.Name -VisibleWindow)) {
+            return $false
+        }
+    }
+
+    if (Test-Path -LiteralPath $installServiceScript) {
+        if (-not (Invoke-PayloadScript -ScriptPath $installServiceScript -DisplayName ("service setup script ({0})" -f $ServiceDirectory.Name) -ServiceDirectoryName $ServiceDirectory.Name -VisibleWindow)) {
+            return $false
+        }
+
+        if ($ServiceDirectory.Name -like '*win11-install') {
+            $credentialInfo = Get-1PanelCredentialInfo
+            Show-1PanelCredentialWindow -Url $credentialInfo.Url -Username $credentialInfo.Username -SecretValue $credentialInfo.Password
+        }
+        elseif ($ServiceDirectory.Name -like '*CIKE-install') {
+            Show-CikeCredentialWindow
+        }
+    }
+
+    Write-Log -Level 'INFO' -Message ("Payload service directory completed successfully: {0}" -f $ServiceDirectory.Name)
+    return $true
 }
 
 function Get-1PanelCredentialInfo {
@@ -308,6 +373,24 @@ function Show-1PanelCredentialWindow {
     Write-Log -Level 'INFO' -Message 'Opened detached 1Panel credential window.'
 }
 
+function Show-CikeCredentialWindow {
+    $commandLine = @(
+        'title CIKE Deployment Complete',
+        'echo ==================================================',
+        'echo.',
+        'echo    CIKE Deployment Complete!',
+        'echo    CIKE Web: http://localhost:980',
+        'echo    CIKE Admin Web: http://localhost:980/admin',
+        'echo    CIKE Admin Account: admin@cloud.ai / admin',
+        'echo.',
+        'echo ==================================================',
+        'pause'
+    ) -join ' & '
+
+    Start-Process -FilePath 'cmd.exe' -ArgumentList @('/d', '/k', $commandLine) -WindowStyle Normal
+    Write-Log -Level 'INFO' -Message 'Opened detached CIKE credential window.'
+}
+
 if (-not (Test-Path -LiteralPath $baseDir)) {
     New-Item -ItemType Directory -Path $baseDir -Force | Out-Null
 }
@@ -326,6 +409,13 @@ if (Test-Path -LiteralPath $markerPath) {
 
 if (-not (Test-Path -LiteralPath $dockerPayloadDir)) {
     Write-Log -Level 'INFO' -Message 'No payload directory exists at C:\Payload\DockerImages. Skipping setup.'
+    Complete-FirstBootSetup
+    exit 0
+}
+
+$payloadDirectories = @(Get-OrderedPayloadDirectories)
+if ($payloadDirectories.Count -eq 0) {
+    Write-Log -Level 'INFO' -Message 'No ordered payload service directories were found. Skipping setup.'
     Complete-FirstBootSetup
     exit 0
 }
@@ -358,34 +448,16 @@ if (-not (Wait-DockerDaemonReadyShort -DockerExe $dockerExe)) {
 
 $payloadFailed = $false
 
-$loadImagesScript = Join-Path $dockerPayloadDir 'load_images.bat'
-if (Test-Path -LiteralPath $loadImagesScript) {
-    if (-not (Invoke-PayloadScript -ScriptPath $loadImagesScript -DisplayName 'docker image load script')) {
+foreach ($payloadDirectory in $payloadDirectories) {
+    if (-not (Invoke-PayloadService -ServiceDirectory $payloadDirectory)) {
         $payloadFailed = $true
-    }
-}
-
-$appstoreScript = Join-Path $dockerPayloadDir 'install_appstore.bat'
-$appstoreSucceeded = $false
-if (Test-Path -LiteralPath $appstoreScript) {
-    # Run the installer hidden. On success we open a detached credential window, and
-    # on failure the batch script is responsible for opening its own detached error window.
-    if (-not (Invoke-PayloadScript -ScriptPath $appstoreScript -DisplayName 'appstore setup script')) {
-        $payloadFailed = $true
-    }
-    else {
-        $appstoreSucceeded = $true
+        break
     }
 }
 
 if ($payloadFailed) {
     Write-Log -Level 'WARNING' -Message 'One or more payload scripts failed. Setup will retry on the next logon.'
     exit 1
-}
-
-if ($appstoreSucceeded) {
-    $credentialInfo = Get-1PanelCredentialInfo
-    Show-1PanelCredentialWindow -Url $credentialInfo.Url -Username $credentialInfo.Username -SecretValue $credentialInfo.Password
 }
 
 Complete-FirstBootSetup

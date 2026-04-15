@@ -36,10 +36,11 @@ The solution is divided into three runtime stages:
 ### 3.3 First-Logon Automation
 
 - `templates/SetupComplete.cmd` enables WinRE in the deployed OS and registers the first-logon automation entry.
+- `templates/firstboot-launcher.vbs` launches `firstboot.ps1` through `wscript.exe` without showing a blank console window at logon.
 - `templates/register-firstboot.ps1` creates `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Run\CodexFirstBoot`.
-- `templates/firstboot.ps1` registers Docker Desktop auto-start in `HKCU`, starts Docker Desktop for the current session, waits for the daemon to become ready, and runs:
-  - `C:\Payload\DockerImages\load_images.bat`
-  - `C:\Payload\DockerImages\install_appstore.bat`
+- `templates/firstboot.ps1` registers Docker Desktop auto-start in `HKCU`, starts Docker Desktop for the current session, waits for the daemon to become ready, and scans ordered `C:\Payload\DockerImages\NN-name\` service directories.
+  - For each service directory it runs `load_images.bat`
+  - Then it runs `install_service.bat`
 
 ## 4. Data Layout
 
@@ -48,8 +49,10 @@ The solution is divided into three runtime stages:
 ```text
 \sources\install.wim
 \sources\winpe-autodeploy.tag
-\payload\docker-images\load_images.bat          optional
-\payload\docker-images\install_appstore.bat     optional
+\payload\docker-images\10-win11-install\load_images.bat      optional
+\payload\docker-images\10-win11-install\install_service.bat  optional
+\payload\docker-images\20-CIKE-install\load_images.bat       optional
+\payload\docker-images\20-CIKE-install\install_service.bat   optional
 \payload\docker-images\*.tar                    optional
 ```
 
@@ -75,14 +78,14 @@ First-logon logs:
 - `C:\ProgramData\FirstBoot\setupcomplete.log`
 - `C:\ProgramData\FirstBoot\register-firstboot.log`
 - `C:\ProgramData\FirstBoot\firstboot.log`
-- `C:\ProgramData\FirstBoot\PayloadLogs\load_images_<timestamp>.log`
-- `C:\ProgramData\FirstBoot\PayloadLogs\install_appstore_<timestamp>.log`
+- `C:\ProgramData\FirstBoot\PayloadLogs\<service>_load_images_<timestamp>.log`
+- `C:\ProgramData\FirstBoot\PayloadLogs\<service>_install_service_<timestamp>.log`
 
-`install_appstore.bat` runs hidden during automation. After success, `firstboot.ps1` opens a detached credential window for the operator. On failure, the batch script opens a detached error window. Sensitive values are not persisted in the payload log.
+`load_images.bat` and `install_service.bat` run in visible `cmd.exe` windows during automation and close automatically on success. Those windows display a do-not-close notice because closing them interrupts the current payload step. After success, the `10-win11-install` service opens a detached 1Panel credential window and the `20-CIKE-install` service opens a detached CIKE success window. Those final popups are detached and do not block the first-logon flow from completing. On failure, the batch script opens a detached error window. Sensitive values are not persisted in the payload log.
 
 ## 6. Constraints and Risks
 
 - Both USB preparation and runtime deployment are destructive operations and wipe disks.
 - Source discovery intentionally accepts exactly one valid deployment source to reduce the risk of using the wrong image.
 - Docker automation depends on Docker Desktop rather than a standalone Windows `dockerd` service.
-- Payload discovery is filename-based and currently limited to `load_images.bat` and `install_appstore.bat`.
+- Payload discovery is directory-based and expects ordered `NN-name` service folders containing `load_images.bat` and `install_service.bat`.

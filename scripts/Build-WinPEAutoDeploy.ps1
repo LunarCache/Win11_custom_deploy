@@ -84,6 +84,7 @@ foreach ($requiredTemplate in @(
     'diskpart-uefi.txt',
     'startnet.cmd',
     'firstboot.ps1',
+    'firstboot-launcher.vbs',
     'register-firstboot.ps1',
     'SetupComplete.cmd'
 )) {
@@ -155,6 +156,7 @@ try {
     Write-RenderedTemplate -TemplatePath (Join-Path $templatesDir 'diskpart-uefi.txt') -DestinationPath (Join-Path $system32Dir 'diskpart-uefi.txt') -Tokens $tokens
     Write-RenderedTemplate -TemplatePath (Join-Path $templatesDir 'startnet.cmd') -DestinationPath (Join-Path $system32Dir 'startnet.cmd')
     Write-RenderedTemplate -TemplatePath (Join-Path $templatesDir 'firstboot.ps1') -DestinationPath (Join-Path $system32Dir 'firstboot.ps1')
+    Write-RenderedTemplate -TemplatePath (Join-Path $templatesDir 'firstboot-launcher.vbs') -DestinationPath (Join-Path $system32Dir 'firstboot-launcher.vbs')
     Write-RenderedTemplate -TemplatePath (Join-Path $templatesDir 'register-firstboot.ps1') -DestinationPath (Join-Path $system32Dir 'register-firstboot.ps1')
     Write-RenderedTemplate -TemplatePath (Join-Path $templatesDir 'SetupComplete.cmd') -DestinationPath (Join-Path $system32Dir 'SetupComplete.cmd')
     Write-RenderedTemplate -TemplatePath (Join-Path $templatesDir 'unattend.xml') -DestinationPath (Join-Path $system32Dir 'unattend.xml')

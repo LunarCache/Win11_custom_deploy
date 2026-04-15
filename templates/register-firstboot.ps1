@@ -12,9 +12,10 @@ $baseDir = 'C:\ProgramData\FirstBoot'
 $logPath = Join-Path $baseDir 'register-firstboot.log'
 $runKeyPath = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run'
 $runValueName = 'CodexFirstBoot'
-$hiddenRunCommand = '"{0}" -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "{1}"' -f `
-    "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe", `
-    (Join-Path $baseDir 'firstboot.ps1')
+$launcherPath = Join-Path $baseDir 'firstboot-launcher.vbs'
+$hiddenRunCommand = '"{0}" "{1}"' -f `
+    "$env:SystemRoot\System32\wscript.exe", `
+    $launcherPath
 
 function Write-Log {
     param(
@@ -35,6 +36,11 @@ if (-not (Test-Path -LiteralPath $baseDir)) {
 }
 
 Write-Log -Level 'INFO' -Message 'Registering first-logon Docker payload importer.'
+
+if (-not (Test-Path -LiteralPath $launcherPath -PathType Leaf)) {
+    Write-Log -Level 'WARNING' -Message ("Launcher script was not found: {0}" -f $launcherPath)
+    exit 1
+}
 
 New-Item -Path $runKeyPath -Force | Out-Null
 Set-ItemProperty -Path $runKeyPath -Name $runValueName -Value $hiddenRunCommand
