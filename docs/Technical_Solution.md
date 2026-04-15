@@ -61,6 +61,7 @@ The solution is divided into three runtime stages:
 ```text
 C:\Payload\DockerImages\...
 C:\ProgramData\FirstBoot\firstboot.ps1
+C:\ProgramData\FirstBoot\firstboot-launcher.vbs
 C:\ProgramData\FirstBoot\register-firstboot.ps1
 C:\Windows\Setup\Scripts\SetupComplete.cmd
 ```

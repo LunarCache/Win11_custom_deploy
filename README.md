@@ -226,6 +226,7 @@ Inside the deployed OS after staging:
 ```text
 C:\Payload\DockerImages\...
 C:\ProgramData\FirstBoot\firstboot.ps1
+C:\ProgramData\FirstBoot\firstboot-launcher.vbs
 C:\ProgramData\FirstBoot\register-firstboot.ps1
 C:\ProgramData\FirstBoot\setupcomplete.log
 C:\Windows\Setup\Scripts\SetupComplete.cmd

@@ -1,8 +1,8 @@
-# WinPE Auto Deploy 项目交付级 SOP
+# Windows 11 自动部署交付标准操作规程
 
 ## 1. 文档信息
 
-文档名称：WinPE Auto Deploy 项目标准操作规程（SOP）
+文档名称：Windows 11 自动部署标准操作规程（SOP）
 
 文档版本：v1.0
 
@@ -196,7 +196,7 @@ Set-ExecutionPolicy -Scope Process Bypass -Force
 2. `BCDBoot W:\Windows /s S: /f UEFI` 写入 UEFI 启动文件
 3. 把 `unattend.xml` 复制到 `W:\Windows\Panther\unattend.xml`
 4. 使用 `W:\Windows\System32\reagentc.exe /Setreimage` 设置 WinRE 路径
-5. 把 `firstboot.ps1`、`register-firstboot.ps1` 和 `SetupComplete.cmd` 注入目标系统
+5. 把 `firstboot.ps1`、`firstboot-launcher.vbs`、`register-firstboot.ps1` 和 `SetupComplete.cmd` 注入目标系统
 6. 若源介质存在 `\payload\docker-images`，则复制到 `W:\Payload\DockerImages`
 7. 保存日志并自动重启
 
@@ -211,13 +211,15 @@ Set-ExecutionPolicy -Scope Process Bypass -Force
 1. 若 `C:\ProgramData\FirstBoot\done.tag` 已存在，则清理 Run 注册并退出。
 2. 若 `C:\Payload\DockerImages` 不存在，则视为无需载荷，直接写入 `done.tag` 并退出。
 3. 若找不到 `docker.exe`，则返回失败，让 Run 项保留，等待下次登录重试。
-4. 若发现 Docker Desktop，可写入 `HKCU\...\Run\DockerDesktopAutoStart`，为未来登录建立自启动。
-5. 脚本优先执行 `docker desktop start`，失败后回退为直接启动 `Docker Desktop.exe`。
-6. 最多轮询 10 次 Docker Desktop 进程出现情况，每次间隔 2 秒。
-7. 进程出现后，再按 `2,2,3,5,8,8` 秒节奏多次执行 `docker info`，确认 daemon 已就绪。
+4. `register-firstboot.ps1` 注册的是 `wscript.exe + firstboot-launcher.vbs`，因此登录后不会先弹出一个空白 PowerShell 控制台；真正的 `firstboot.ps1` 在后台启动。
+5. 若发现 Docker Desktop，可写入 `HKCU\...\Run\DockerDesktopAutoStart`，为未来登录建立自启动。
+6. 脚本先检查 `docker info` 是否已经可用；若未就绪，则以非阻塞方式触发 `docker desktop start` 或回退启动 `Docker Desktop.exe`。
+7. 之后统一通过多轮 `docker info` 轮询确认 daemon 已就绪，而不是把启动命令的返回时机当作就绪条件。
 8. Docker 就绪后，按目录名前缀顺序遍历 `C:\Payload\DockerImages\NN-name\`；每个服务目录内如存在 `load_images.bat` 则先执行，如存在 `install_service.bat` 则随后执行。
-9. 任一载荷返回非零时，本次首登流程不写完成标记，等待下次登录继续重试。
-10. 全部成功后，若 `10-win11-install\install_service.bat` 成功，还会弹出 1Panel 凭据窗口，然后写入 `done.tag` 并移除 Run 项。
+9. `load_images.bat` 和 `install_service.bat` 以可见 `cmd.exe` 窗口执行，窗口内会提示“不要关闭，否则会中断当前部署步骤”；脚本成功时窗口自动关闭。
+10. 若某个 `NN-name` 目录内没有任何可执行入口脚本，会被记日志后显式跳过，不影响其他服务继续执行。
+11. 任一载荷返回非零时，本次首登流程不写完成标记，等待下次登录继续重试。
+12. 全部成功后，`10-win11-install` 会弹出 1Panel 凭据窗口，`20-CIKE-install` 会弹出 CIKE 成功信息窗口；这些结果窗口不会阻塞收尾逻辑，随后脚本写入 `done.tag` 并移除 Run 项。
 
 ## 11. 运行结果验收标准
 
