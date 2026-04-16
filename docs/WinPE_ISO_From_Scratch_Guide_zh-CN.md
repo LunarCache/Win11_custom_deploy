@@ -361,6 +361,94 @@ C:\Payload\DockerImages\
 - 若目录存在但没有这两个脚本，会被记录并跳过
 - 任一脚本非零退出都会触发下一次登录重试
 
+### 8.1 新增 Docker 服务时需要补充的代码内容
+
+如果新增服务能够遵循现有 `NN-name` 目录、`load_images.bat`、`install_service.bat` 约定，通常不需要修改 WinPE 核心脚本，只需要新增一个服务目录并把它作为 `DockerImagesDirectory` 的一部分打包进 ISO 或 USB。需要落地的代码内容如下：
+
+1. 新增服务目录
+
+   例如新增 `30-my-service`：
+
+   ```text
+   C:\Payload\DockerImages\
+   └─ 30-my-service\
+      ├─ load_images.bat
+      ├─ install_service.bat
+      ├─ my-service-image.tar
+      └─ docker-compose.yml
+   ```
+
+   目录名前两位数字决定执行顺序。`templates/firstboot.ps1` 中的 `Get-OrderedPayloadDirectories` 只会识别匹配 `^\d{2}-.+` 的目录，并按目录名排序。
+
+2. 编写 `load_images.bat`
+
+   该脚本用于导入 Docker 镜像，建议把第一个参数作为日志文件路径使用，因为 `templates/firstboot.ps1` 会用如下形式调用它：
+
+   ```cmd
+   call "C:\Payload\DockerImages\30-my-service\load_images.bat" "C:\ProgramData\FirstBoot\PayloadLogs\30-my-service_load_images_<timestamp>.log"
+   ```
+
+   示例：
+
+   ```bat
+   @echo off
+   setlocal
+   set "LOG=%~1"
+   if "%LOG%"=="" set "LOG=%TEMP%\30-my-service_load_images.log"
+
+   >> "%LOG%" echo [%DATE% %TIME%] Loading Docker image for 30-my-service...
+   docker load -i "%~dp0my-service-image.tar" >> "%LOG%" 2>&1
+   if errorlevel 1 exit /b 1
+
+   >> "%LOG%" echo [%DATE% %TIME%] Docker image loaded successfully.
+   exit /b 0
+   ```
+
+3. 编写 `install_service.bat`
+
+   该脚本用于创建目录、复制配置、执行 `docker compose up -d` 或其他安装动作，同样应使用第一个参数写入日志，并用退出码表达结果。
+
+   示例：
+
+   ```bat
+   @echo off
+   setlocal
+   set "LOG=%~1"
+   if "%LOG%"=="" set "LOG=%TEMP%\30-my-service_install_service.log"
+
+   >> "%LOG%" echo [%DATE% %TIME%] Installing 30-my-service...
+   if not exist "C:\MyService" mkdir "C:\MyService" >> "%LOG%" 2>&1
+   copy /y "%~dp0docker-compose.yml" "C:\MyService\docker-compose.yml" >> "%LOG%" 2>&1
+   if errorlevel 1 exit /b 1
+
+   pushd "C:\MyService"
+   docker compose up -d >> "%LOG%" 2>&1
+   set "RESULT=%ERRORLEVEL%"
+   popd
+   if not "%RESULT%"=="0" exit /b %RESULT%
+
+   >> "%LOG%" echo [%DATE% %TIME%] 30-my-service installed successfully.
+   exit /b 0
+   ```
+
+4. 确认基础镜像内已安装 Docker Desktop
+
+   `templates/firstboot.ps1` 不负责安装 Docker Desktop，它只负责查找 `docker.exe`、启动 Docker Desktop、等待 daemon 就绪，然后执行 payload。若新增服务依赖 Docker，Docker Desktop 应在制作参考机和捕获 `install.wim` 前完成安装。
+
+5. 重新打包 ISO 或 USB
+
+   只新增服务目录时，重新执行 `Generate-WinPEIso.ps1 -DockerImagesDirectory ...` 或 `Prepare-WinPEUsb.ps1 -DockerImagesDirectory ...` 即可。`scripts/Generate-WinPEIso.ps1` 和 `scripts/Prepare-WinPEUsb.ps1` 只负责把 payload 复制到介质的 `\payload\docker-images`，不会理解服务内部业务逻辑。
+
+只有在下列情况出现时，才需要修改仓库模板脚本本身：
+
+- 需要识别除 `load_images.bat`、`install_service.bat` 以外的新脚本名：修改 `templates/firstboot.ps1` 的 `Invoke-PayloadService`
+- 需要改变目录命名规则或排序规则：修改 `templates/firstboot.ps1` 的 `Get-OrderedPayloadDirectories`
+- 需要改变 Docker 启动、等待、重试、完成标记或 Run 项清理逻辑：修改 `templates/firstboot.ps1` 主流程
+- 需要像当前 `10-win11-install`、`20-CIKE-install` 一样在服务成功后弹出凭据或提示窗口：在 `Invoke-PayloadService` 中增加对应服务名判断，并新增独立 helper 函数
+- 需要改变 payload 从介质复制到系统盘的位置：修改 `templates/deploy.cmd` 的 `:stage_docker_payloads`，同时同步 `templates/firstboot.ps1` 中的 `$dockerPayloadDir`
+
+修改 `templates/firstboot.ps1`、`templates/deploy.cmd`、`templates/SetupComplete.cmd` 或 `templates/register-firstboot.ps1` 后，必须重新运行 `scripts/Build-WinPEAutoDeploy.ps1`，因为这些模板是在构建阶段注入到 `boot.wim` 的。只重新打包 ISO 不能把模板脚本改动写入已有 `boot.wim`。
+
 ## 9. 生成最终自动部署 ISO
 
 ### 9.1 最常用命令
