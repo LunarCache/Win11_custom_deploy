@@ -15,8 +15,7 @@ $markerPath = Join-Path $baseDir 'done.tag'
 $dockerPayloadDir = 'C:\Payload\DockerImages'
 $runKeyPath = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run'
 $runValueName = 'CodexFirstBoot'
-$dockerDesktopRunKeyPath = 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run'
-$dockerDesktopRunValueName = 'DockerDesktopAutoStart'
+
 
 function Write-Log {
     param(
@@ -87,32 +86,6 @@ function Resolve-DockerDesktopGuiPath {
     return $null
 }
 
-function Set-DockerDesktopAutoStart {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$DockerDesktopPath
-    )
-
-    $runCommand = '"{0}"' -f $DockerDesktopPath
-    New-Item -Path $dockerDesktopRunKeyPath -Force | Out-Null
-
-    $currentValue = $null
-    try {
-        $currentValue = (Get-ItemProperty -Path $dockerDesktopRunKeyPath -Name $dockerDesktopRunValueName -ErrorAction Stop).$dockerDesktopRunValueName
-    }
-    catch {
-        $currentValue = $null
-    }
-
-    if ($currentValue -ne $runCommand) {
-        Set-ItemProperty -Path $dockerDesktopRunKeyPath -Name $dockerDesktopRunValueName -Value $runCommand
-        Write-Log -Level 'INFO' -Message ("Configured Docker Desktop auto-start in HKCU Run: {0}" -f $runCommand)
-    }
-    else {
-        Write-Log -Level 'INFO' -Message 'Docker Desktop auto-start is already configured in HKCU Run.'
-    }
-}
-
 function Start-DockerDesktopBackground {
     param(
         [Parameter(Mandatory = $true)]
@@ -146,14 +119,14 @@ function Start-DockerDesktopBackground {
 }
 
 function Wait-DockerDesktopProcess {
-    for ($attempt = 1; $attempt -le 10; $attempt++) {
+    for ($attempt = 1; $attempt -le 20; $attempt++) {
         $desktopProcess = Get-Process -Name 'Docker Desktop' -ErrorAction SilentlyContinue
         if ($desktopProcess) {
-            Write-Log -Level 'INFO' -Message ("Docker Desktop process detected on attempt {0}/10." -f $attempt)
+            Write-Log -Level 'INFO' -Message ("Docker Desktop process detected on attempt {0}/20." -f $attempt)
             return $true
         }
 
-        Write-Log -Level 'INFO' -Message ("Docker Desktop process not detected yet (attempt {0}/10). Waiting 2 seconds." -f $attempt)
+        Write-Log -Level 'INFO' -Message ("Docker Desktop process not detected yet (attempt {0}/20). Waiting 2 seconds." -f $attempt)
         Start-Sleep -Seconds 2
     }
 
@@ -179,7 +152,7 @@ function Wait-DockerDaemonReadyShort {
         }
     }
 
-    $waitScheduleSeconds = @(2, 2, 3, 5, 8, 8)
+    $waitScheduleSeconds = @(2, 2, 3, 5, 8, 10, 10, 15, 15, 20)
     for ($attempt = 0; $attempt -lt $waitScheduleSeconds.Count; $attempt++) {
         & $DockerExe info *> $null
         if ($LASTEXITCODE -eq 0) {
@@ -219,10 +192,10 @@ function Invoke-PayloadScript {
         $commandLine = 'call "{0}" "{1}"' -f $ScriptPath, $payloadLogPath
 
         $startProcessArgs = @{
-            FilePath   = 'cmd.exe'
+            FilePath     = 'cmd.exe'
             ArgumentList = @('/d', '/c', $commandLine)
-            Wait     = $true
-            PassThru = $true
+            Wait         = $true
+            PassThru     = $true
         }
 
         if ($VisibleWindow) {
@@ -254,8 +227,8 @@ function Get-OrderedPayloadDirectories {
 
     return @(
         Get-ChildItem -LiteralPath $dockerPayloadDir -Directory |
-            Where-Object { $_.Name -match '^\d{2}-.+' } |
-            Sort-Object -Property Name
+        Where-Object { $_.Name -match '^\d{2}-.+' } |
+        Sort-Object -Property Name
     )
 }
 
@@ -309,7 +282,7 @@ function Get-1PanelCredentialInfo {
         Password = 'Cp@12345'
     }
 
-    $composePath = 'C:\1Panel\docker-compose.yml'
+    $composePath = 'C:\CloudPrimeAppstore\docker-compose.yml'
     if (-not (Test-Path -LiteralPath $composePath)) {
         return $credentialInfo
     }
@@ -338,7 +311,7 @@ function Get-1PanelCredentialInfo {
         }
     }
     catch {
-        Write-Log -Level 'WARNING' -Message ("Failed to parse 1Panel credentials from docker-compose.yml: {0}" -f $_.Exception.Message)
+        Write-Log -Level 'WARNING' -Message ("Failed to parse CloudPrimeAppStore credentials from docker-compose.yml: {0}" -f $_.Exception.Message)
     }
 
     return $credentialInfo
@@ -357,10 +330,10 @@ function Show-1PanelCredentialWindow {
     )
 
     $commandLine = @(
-        'title 1Panel Credentials',
+        'title CloudPrimeAppStore Credentials',
         'echo ==================================================',
         'echo.',
-        'echo    1Panel Installation Complete!',
+        'echo   CloudPrimeAppStore Installation Complete!',
         ('echo    URL: {0}' -f $Url),
         ('echo    Username: {0}' -f $Username),
         ('echo    Password: {0}' -f $SecretValue),
@@ -370,7 +343,7 @@ function Show-1PanelCredentialWindow {
     ) -join ' & '
 
     Start-Process -FilePath 'cmd.exe' -ArgumentList @('/d', '/k', $commandLine) -WindowStyle Normal
-    Write-Log -Level 'INFO' -Message 'Opened detached 1Panel credential window.'
+    Write-Log -Level 'INFO' -Message 'Opened detached CloudPrimeAppStore credential window.'
 }
 
 function Show-CikeCredentialWindow {
@@ -427,11 +400,8 @@ if (-not $dockerExe) {
 }
 
 $dockerDesktopPath = Resolve-DockerDesktopGuiPath
-if ($dockerDesktopPath) {
-    Set-DockerDesktopAutoStart -DockerDesktopPath $dockerDesktopPath
-}
-else {
-    Write-Log -Level 'WARNING' -Message 'Docker Desktop executable was not found. Auto-start registration was skipped.'
+if (-not $dockerDesktopPath) {
+    Write-Log -Level 'WARNING' -Message 'Docker Desktop executable was not found. Using partial start.'
 }
 
 Start-DockerDesktopBackground -DockerExe $dockerExe -DockerDesktopPath $dockerDesktopPath

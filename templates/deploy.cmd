@@ -114,9 +114,9 @@ if "!DEPLOYMENT_WARNINGS!"=="1" (
 ) else (
     call :log_info "Deployment completed successfully with no warnings."
 )
-call :log_info "The system will reboot now."
+call :log_info "The system will shutdown now. OOBE will start automatically on next boot."
 call :persist_logs
-wpeutil reboot
+wpeutil shutdown
 exit /b 0
 
 :stage_unattend_xml

@@ -45,5 +45,13 @@ if (-not (Test-Path -LiteralPath $launcherPath -PathType Leaf)) {
 New-Item -Path $runKeyPath -Force | Out-Null
 Set-ItemProperty -Path $runKeyPath -Name $runValueName -Value $hiddenRunCommand
 
+$dockerPath = 'C:\Program Files\Docker\Docker\Docker Desktop.exe'
+if (Test-Path -LiteralPath $dockerPath) {
+    Set-ItemProperty -Path $runKeyPath -Name 'DockerDesktopAutoStart' -Value ('"{0}"' -f $dockerPath)
+    Write-Log -Level 'INFO' -Message 'Registered Docker Desktop auto-start in HKLM Run for all users.'
+} else {
+    Write-Log -Level 'WARNING' -Message 'Docker Desktop executable not found during SYSTEM register phase.'
+}
+
 Write-Log -Level 'INFO' -Message ("Registered HKLM Run entry {0}." -f $runValueName)
 exit 0

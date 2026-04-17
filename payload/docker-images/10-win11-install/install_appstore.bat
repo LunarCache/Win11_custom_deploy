@@ -2,7 +2,7 @@
 setlocal enabledelayedexpansion
 title 10-win11-install Service Setup
 
-set "BASE_DIR=C:\1Panel"
+set "BASE_DIR=C:\CloudPrimeAppstore"
 set "APP_TARGET_DIR=%BASE_DIR%\resource\apps\local"
 set "APP_PACKAGE=apps.zip"
 set "COMPOSE_FILE=%BASE_DIR%\docker-compose.yml"
@@ -43,7 +43,7 @@ echo       - PANEL_PASSWORD=Cp@12345
 echo       - PANEL_ENTRANCE=entrance
 echo       - TZ=Asia/Shanghai
 echo     volumes:
-echo       - C:\1Panel:/opt/1panel
+echo       - C:\CloudPrimeAppstore:/opt/1panel
 echo       - /var/run/docker.sock:/var/run/docker.sock
 ) > "%COMPOSE_FILE%"
 if errorlevel 1 (
@@ -67,7 +67,7 @@ if errorlevel 1 (
     exit /b 1
 )
 
-call :log [5/5] Starting 1Panel via Docker...
+call :log [5/5] Starting CloudPrimeAppstore via Docker...
 cd /d "%BASE_DIR%"
 call :run_and_log docker compose up -d
 if errorlevel 1 (
@@ -78,14 +78,14 @@ if errorlevel 1 (
 
 echo ==================================================
 echo.
-echo    1Panel Installation Complete!
+echo    CloudPrimeAppstore Installation Complete!
 echo    URL: http://localhost:10086/entrance
 echo    Username: admin
 echo    Password: Cp@12345
 echo.
 echo ==================================================
 
-call :append_log [INFO] 1Panel installation completed successfully.
+call :append_log [INFO] CloudPrimeAppstore installation completed successfully.
 call :append_log [INFO] URL: http://localhost:10086/entrance
 call :append_log [INFO] Username and password are displayed by firstboot.ps1 in a detached credential window after the installer exits.
 exit /b 0
@@ -102,7 +102,7 @@ if defined PAYLOAD_LOG (
 exit /b 0
 
 :show_error_window
-start "1Panel Setup Error" cmd /k "title 1Panel Setup Error && echo ================================================== && echo. && echo    1Panel setup failed. && echo    %* && echo. && echo    Review the payload log for details. && echo ================================================== && pause"
+start "CloudPrimeAppstore Setup Error" cmd /k "title CloudPrimeAppstore Setup Error && echo ================================================== && echo. && echo    CloudPrimeAppstore setup failed. && echo    %* && echo. && echo    Review the payload log for details. && echo ================================================== && pause"
 exit /b 0
 
 :run_and_log
