@@ -69,19 +69,21 @@
 - `templates/diskpart-uefi.txt`
   - 目标机磁盘分区模板。
   - 当前实现固定为：
-    - EFI 100 MB，盘符 `S:`
+    - EFI 100 MB (FAT32, System), 盘符 `S:`
     - MSR 16 MB
-    - Windows 主分区，盘符 `W:`
-    - Recovery 分区，盘符 `R:`
+    - Windows 主分区 (NTFS, Windows), 盘符 `W:`
+    - Recovery 分区 (NTFS, Recovery), 盘符 `R:`
 
 - `templates/unattend.xml`
-  - 当前仅配置 `zh-CN` 语言与 OOBE 隐藏无线网络页面。
+  - 当前仅隐藏 OOBE 无线网络页面。
+  - 不配置语言、区域、账户、产品密钥或其他 OOBE 应答。
 
 - `templates/SetupComplete.cmd`
-  - 在部署后启用 WinRE，并调用 `register-firstboot.ps1` 注册首登自动化。
+  - 在部署后启用 WinRE，随后执行 `register-firstboot.ps1` 注册首登自动化任务。
 
 - `templates/register-firstboot.ps1`
   - 向 `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Run` 注册 `CodexFirstBoot`。
+  - 若检测到 Docker Desktop，则同时注册 `HKLM\...\Run\DockerDesktopAutoStart`。
 
 - `templates/firstboot-launcher.vbs`
   - 用隐藏窗口方式启动 `firstboot.ps1`，避免登录时先弹出空白控制台。
@@ -91,6 +93,7 @@
   - 检测 `C:\Payload\DockerImages\NN-name\` 目录。
   - 尝试启动并等待 Docker Desktop 就绪。
   - 顺序执行每个服务目录中的 `load_images.bat` 和 `install_service.bat`。
+  - 对名称匹配 `*win11-install` 的服务显示 1Panel 凭据窗口，对名称匹配 `*CIKE-install` 的服务显示 CIKE 成功信息窗口。
   - 所有脚本成功后写入 `done.tag` 并移除 Run 项；失败则保留 Run 项，在下次登录继续重试。
 
 ## 3. 当前方案的重要约束
@@ -340,18 +343,18 @@ Set-ExecutionPolicy -Scope Process Bypass -Force
 
 ```text
 C:\Payload\DockerImages\
-├─ 10-win11-install\
-│  ├─ load_images.bat
-│  ├─ install_service.bat
-│  └─ *.tar
-├─ 20-CIKE-install\
-│  ├─ load_images.bat
-│  ├─ install_service.bat
-│  └─ *.tar
-└─ NN-other-service\
-   ├─ load_images.bat
-   ├─ install_service.bat
-   └─ other files
++-- 10-win11-install\
+|   +-- load_images.bat
+|   +-- install_service.bat
+|   +-- *.tar
++-- 20-CIKE-install\
+|   +-- load_images.bat
+|   +-- install_service.bat
+|   +-- *.tar
++-- NN-other-service\
+    +-- load_images.bat
+    +-- install_service.bat
+    +-- other files
 ```
 
 当前实现约束如下：
@@ -371,11 +374,11 @@ C:\Payload\DockerImages\
 
    ```text
    C:\Payload\DockerImages\
-   └─ 30-my-service\
-      ├─ load_images.bat
-      ├─ install_service.bat
-      ├─ my-service-image.tar
-      └─ docker-compose.yml
+   +-- 30-my-service\
+       +-- load_images.bat
+       +-- install_service.bat
+       +-- my-service-image.tar
+       +-- docker-compose.yml
    ```
 
    目录名前两位数字决定执行顺序。`templates/firstboot.ps1` 中的 `Get-OrderedPayloadDirectories` 只会识别匹配 `^\d{2}-.+` 的目录，并按目录名排序。
@@ -444,7 +447,7 @@ C:\Payload\DockerImages\
 - 需要识别除 `load_images.bat`、`install_service.bat` 以外的新脚本名：修改 `templates/firstboot.ps1` 的 `Invoke-PayloadService`
 - 需要改变目录命名规则或排序规则：修改 `templates/firstboot.ps1` 的 `Get-OrderedPayloadDirectories`
 - 需要改变 Docker 启动、等待、重试、完成标记或 Run 项清理逻辑：修改 `templates/firstboot.ps1` 主流程
-- 需要像当前 `10-win11-install`、`20-CIKE-install` 一样在服务成功后弹出凭据或提示窗口：在 `Invoke-PayloadService` 中增加对应服务名判断，并新增独立 helper 函数
+- 需要像当前 `*win11-install`、`*CIKE-install` 一样在服务成功后弹出凭据或提示窗口：在 `Invoke-PayloadService` 中增加对应服务名判断，并新增独立 helper 函数
 - 需要改变 payload 从介质复制到系统盘的位置：修改 `templates/deploy.cmd` 的 `:stage_docker_payloads`，同时同步 `templates/firstboot.ps1` 中的 `$dockerPayloadDir`
 
 修改 `templates/firstboot.ps1`、`templates/deploy.cmd`、`templates/SetupComplete.cmd` 或 `templates/register-firstboot.ps1` 后，必须重新运行 `scripts/Build-WinPEAutoDeploy.ps1`，因为这些模板是在构建阶段注入到 `boot.wim` 的。只重新打包 ISO 不能把模板脚本改动写入已有 `boot.wim`。
@@ -518,7 +521,7 @@ C:\WinPE_AutoDeploy_amd64\WinPE_AutoDeploy_amd64.iso
 10. 对已部署系统执行 `reagentc /Setreimage`
 11. 注入 `SetupComplete.cmd`、`firstboot.ps1`、`register-firstboot.ps1` 与 `firstboot-launcher.vbs`
 12. 如存在 payload，则复制到 `W:\Payload\DockerImages`
-13. 保存日志并重启
+13. 保存日志并关机，下一次开机进入已部署 Windows 的 OOBE
 
 ## 11. 首次开机与首登后的行为
 
@@ -526,7 +529,7 @@ C:\WinPE_AutoDeploy_amd64\WinPE_AutoDeploy_amd64.iso
 
 - `SetupComplete.cmd` 尝试 `reagentc /enable`
 - `SetupComplete.cmd` 调用 `register-firstboot.ps1`
-- `register-firstboot.ps1` 在 `HKLM\...\Run` 下创建 `CodexFirstBoot`
+- `register-firstboot.ps1` 在 `HKLM\...\Run` 下创建 `CodexFirstBoot`，并在检测到 Docker Desktop 时创建 `DockerDesktopAutoStart`
 - 用户首次登录后，`firstboot-launcher.vbs` 以隐藏方式启动 `firstboot.ps1`
 - `firstboot.ps1` 检查 `C:\Payload\DockerImages`
 - 若不存在 payload，则直接写入完成标记并退出
@@ -548,12 +551,12 @@ C:\WinPE_AutoDeploy_amd64\WinPE_AutoDeploy_amd64.iso
 
 - 在 Hyper-V、VMware 或其他 UEFI 虚拟机中挂载最终 ISO
 - 确保运行时只看到一个合法源
-- 验证自动分区、应用映像和重启流程
+- 验证自动分区、应用映像、WinPE 关机和下次开机进入 OOBE 的流程
 
 ### 12.3 首登验证
 
-- 验证 OOBE 语言是否为 `zh-CN`
-- 验证 OOBE 网络页面是否被隐藏
+- 验证 OOBE 无线网络页面是否被隐藏
+- 验证其他 OOBE 流程是否保持 Windows 标准行为
 - 验证 `SetupComplete.cmd` 是否产生 `setupcomplete.log`
 - 验证 `firstboot.log` 是否记录 Docker 检测与 payload 执行
 

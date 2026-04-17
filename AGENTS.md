@@ -5,8 +5,8 @@ This repository builds and packages a customized WinPE deployment environment fo
 
 - `scripts/`: primary PowerShell entry points such as `Build-WinPEAutoDeploy.ps1`, `Prepare-WinPEUsb.ps1`, and shared helpers in `Common-WinPEHelpers.ps1`.
 - `templates/`: injected runtime assets and deployment templates, including `deploy.cmd`, `startnet.cmd`, `unattend.xml`, and first-boot scripts.
-- `docs/`: design and architecture notes.
-- `win11-install/`: deployment payload artifacts such as `.tar`, `.bat`, and app bundles used after first logon.
+- `docs/`: design notes, technical solution documents, SOPs, ISO creation guides, and generated delivery documents such as `.docx`.
+- `payload/`: optional deployment payload staging assets used after first logon, when present.
 - `README.md`: operator workflow, prerequisites, and runtime behavior. Keep it aligned with script changes.
 
 ## Build, Test, and Development Commands
@@ -26,6 +26,8 @@ Set-ExecutionPolicy -Scope Process Bypass -Force
 Use PowerShell with 4-space indentation, `Set-StrictMode -Version Latest`, and `$ErrorActionPreference = 'Stop'` for operational scripts. Prefer approved verb-noun function names such as `New-DirectoryIfMissing`. Name scripts and helpers in PascalCase, and keep template token names uppercase with double underscores, for example `__TARGET_DISK__`.
 
 Favor small helper functions, explicit parameter validation, and ASCII output for WinPE-consumed batch or DiskPart files.
+
+For Chinese delivery `.docx` documents, use `宋体` for Chinese text and `Times New Roman` for Latin text, numbers, and technical identifiers. When a Markdown source has a matching generated `.docx`, update and validate both so the deliverable stays aligned with the source.
 
 ## Testing Guidelines
 There is no automated test suite in this repository today. Validate changes with:

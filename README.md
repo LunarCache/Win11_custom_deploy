@@ -10,16 +10,16 @@ This repository builds a reusable UEFI-only WinPE deployment environment for app
   - `\sources\install.wim`
   - `\sources\winpe-autodeploy.tag`
 - Wipes the configured target disk and recreates a fixed GPT layout:
-  - EFI `S:`
-  - MSR
-  - Windows `W:`
-  - Recovery `R:`
+  - EFI `S:` (100 MB)
+  - MSR (16 MB)
+  - Windows `W:` (Primary)
+  - Recovery `R:` (approx. 1024 MB)
 - Applies the selected WIM index with `DISM`, rebuilds boot files with `BCDBoot`, and stages `unattend.xml`, `SetupComplete.cmd`, and first-logon scripts into the deployed OS.
 - Preserves the main deployment log to:
   - `X:\AutoDeploy.log`
   - `W:\Windows\Temp\AutoDeploy.log`
   - `\<deployment-media>\DeployLogs\AutoDeploy.log` when the source media is still available
-- Optionally copies `\payload\docker-images\*` from deployment media into `C:\Payload\DockerImages` inside the deployed OS.
+- Optionally copies `\payload\docker-images\*` from deployment media into `W:\Payload\DockerImages` (staged to `C:\Payload\DockerImages` in the deployed OS).
 
 ## Repository layout
 
@@ -29,39 +29,42 @@ This repository builds a reusable UEFI-only WinPE deployment environment for app
   - Renders template tokens such as `__TARGET_DISK__` and `__WIM_INDEX__`.
   - Injects the runtime and post-deployment assets into `Windows\System32` inside the mounted image.
 - `scripts\Prepare-WinPEUsb.ps1`
-  - Destructively prepares a dual-partition USB disk.
+  - Destructively prepares a dual-partition USB disk (MBR for compatibility).
   - Uses `MakeWinPEMedia.cmd /UFD` to populate the FAT32 boot partition.
   - Copies `install.wim`, `winpe-autodeploy.tag`, and optional payload files to the NTFS data partition.
 - `scripts\Generate-WinPEIso.ps1`
   - Packages an existing customized work directory as an ISO.
   - Can optionally bundle `install.wim` and payload files into a temporary staging copy before packaging.
+  - Leaves the original `WinPEWorkDir\media` tree unchanged.
 - `scripts\Export-CleanWinPEIso.ps1`
   - Produces a stock WinPE ISO with no project-specific automation injected.
   - Intended for maintenance or image-capture scenarios.
 - `templates\deploy.cmd`
   - Main WinPE runtime entry.
-  - Finds the source image, partitions the target disk, applies Windows, configures boot, stages files, and reboots.
+  - Finds the source image, partitions the target disk, applies Windows, configures boot, stages files, and shuts down WinPE.
 - `templates\diskpart-uefi.txt`
   - DiskPart template used at runtime.
 - `templates\startnet.cmd`
   - WinPE bootstrap entry point that runs `wpeinit` and then `deploy.cmd`.
 - `templates\unattend.xml`
-  - Offline OOBE settings for `zh-CN`.
-  - Only skips the network setup page during OOBE; the rest of the first-run flow remains standard Windows setup.
+  - Offline OOBE setting that hides the wireless network setup page.
+  - Does not configure locale, account creation, product key, or other OOBE answers.
 - `templates\SetupComplete.cmd`
   - Runs `reagentc /enable` inside the deployed OS.
-  - Registers `firstboot.ps1` through `register-firstboot.ps1`.
+  - Runs `register-firstboot.ps1` to register the first-logon task.
 - `templates\firstboot-launcher.vbs`
-  - Launches `firstboot.ps1` through `wscript.exe` so logon does not show a blank console window.
+  - Launches `firstboot.ps1` through `wscript.exe` with a hidden window.
+- `templates\register-firstboot.ps1`
+  - Registers `HKLM\...\Run\CodexFirstBoot` to launch the VBS wrapper.
+  - Registers `HKLM\...\Run\DockerDesktopAutoStart` for all users when Docker Desktop is already installed.
 - `templates\firstboot.ps1`
-  - Runs on user logon from `HKLM\...\Run`.
-  - Registers `HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Run\DockerDesktopAutoStart` for future Docker Desktop auto-start.
-  - Ensures Docker is present and ready.
-  - Starts Docker Desktop in the background with `docker desktop start` for the current first-logon run.
+  - Runs on user logon from `HKLM\...\Run\CodexFirstBoot`.
+  - Ensures Docker is present and ready (using `docker desktop start` and polling `docker info`).
   - Scans ordered `NN-name` service directories under `C:\Payload\DockerImages`.
-  - Executes `load_images.bat` and `install_service.bat` when present in each service directory.
-  - Writes payload logs to `C:\ProgramData\FirstBoot\PayloadLogs\`.
-  - Removes the Run registration only after Docker is ready and all detected payload scripts return exit code `0`.
+  - Executes `load_images.bat` and `install_service.bat` in visible windows.
+  - `*win11-install` service: Parses `C:\CloudPrimeAppstore\docker-compose.yml` to display 1Panel credentials, falling back to built-in defaults.
+  - `*CIKE-install` service: Displays CIKE success information.
+  - Removes the Run registration only after all detected payload scripts return exit code `0`.
 
 ## Requirements
 
@@ -175,7 +178,7 @@ When the target machine boots into the prepared WinPE image:
 8. `W:\Windows\System32\reagentc.exe /Setreimage` points WinRE to `W:\Windows\System32\Recovery`.
 9. `firstboot.ps1`, `register-firstboot.ps1`, and `SetupComplete.cmd` are staged into the deployed OS.
 10. If present, `\payload\docker-images\*` is copied to `W:\Payload\DockerImages`.
-11. Logs are persisted and WinPE reboots.
+11. Logs are persisted and WinPE shuts down. The next power-on starts Windows OOBE from the deployed disk.
 
 ## First-logon behavior
 
@@ -184,20 +187,19 @@ After Windows boots:
 - `SetupComplete.cmd` enables WinRE with `reagentc /enable`.
 - `register-firstboot.ps1` creates `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Run\CodexFirstBoot`.
 - `register-firstboot.ps1` points that Run entry at `wscript.exe` and `firstboot-launcher.vbs` so the hidden first-logon task does not flash an empty console.
+- If Docker Desktop already exists at `C:\Program Files\Docker\Docker\Docker Desktop.exe`, `register-firstboot.ps1` also creates `HKLM\...\Run\DockerDesktopAutoStart`.
 - `firstboot.ps1` runs on the first successful user logon and behaves as follows:
   - If `C:\Payload\DockerImages` does not exist, it writes `done.tag`, removes the Run entry, and exits.
   - If `C:\Payload\DockerImages` exists but contains no ordered `NN-name` service directories, it writes `done.tag`, removes the Run entry, and exits.
   - If `docker.exe` is missing, it exits with code `1` so the Run entry remains for the next logon.
-  - If Docker Desktop is installed, it registers a per-user auto-start Run entry for future logons.
   - It starts Docker Desktop in the background with `docker desktop start`, falls back to launching `Docker Desktop.exe` directly when needed, then waits for the `Docker Desktop` process to appear.
   - After the process appears, it performs a short `docker info` readiness check before running any payload script.
   - If Docker becomes ready, it scans `C:\Payload\DockerImages\NN-name\` service directories in name order.
   - For each service directory, it runs `load_images.bat` when present and `install_service.bat` when present.
   - Payload logs are written to `C:\ProgramData\FirstBoot\PayloadLogs\<service>_<script>_<timestamp>.log`.
-  - `load_images.bat` and `install_service.bat` run in visible `cmd.exe` windows during first-logon automation and close automatically on success.
-  - Those visible payload windows now show a do-not-close notice because closing them interrupts the current payload step.
-  - `10-win11-install\install_service.bat` writes non-sensitive execution details to its payload log, opens a detached credential window after success, and opens a detached error window on failure.
-  - `20-CIKE-install\install_service.bat` opens a detached CIKE success window after success.
+  - `load_images.bat` and `install_service.bat` run in visible `cmd.exe` windows during first-logon automation. Window text and close behavior are controlled by the payload batch files.
+  - `*win11-install` opens a detached CloudPrimeAppStore credential window after its `install_service.bat` succeeds.
+  - `*CIKE-install` opens a detached CIKE success window after its `install_service.bat` succeeds.
   - Final success popups are detached windows and do not block or interrupt the first-logon flow from completing.
   - It creates `C:\ProgramData\FirstBoot\done.tag` and removes the Run entry only if all detected payload scripts succeed.
 

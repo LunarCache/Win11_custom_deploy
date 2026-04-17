@@ -11,10 +11,10 @@ This project provides a WinPE-based Windows deployment pipeline built around a c
   - `\sources\install.wim`
   - `\sources\winpe-autodeploy.tag`
 - The target disk is wiped and repartitioned as GPT with:
-  - EFI `S:`
-  - MSR
-  - Windows `W:`
-  - Recovery `R:`
+  - EFI `S:` (100 MB, FAT32, label `System`)
+  - MSR (16 MB)
+  - Windows `W:` (NTFS, label `Windows`)
+  - Recovery `R:` (about 1024 MB, NTFS, label `Recovery`)
 
 ## Build-time components
 
@@ -78,14 +78,14 @@ Main responsibilities:
 8. Set WinRE image path with `W:\Windows\System32\reagentc.exe`.
 9. Stage first-logon scripts into the deployed OS.
 10. Copy optional payload files from `\payload\docker-images`.
-11. Persist logs and reboot.
+11. Persist logs and shut down WinPE.
 
 ## Post-deployment components
 
 ### `templates\unattend.xml`
 
-- Sets locale to `zh-CN`.
-- Only skips the network setup page during OOBE.
+- Hides only the wireless network setup page during OOBE.
+- Does not set locale, region, account creation, product key, or other OOBE answers.
 - Leaves the rest of the first-run Windows setup flow unchanged.
 
 ### `templates\SetupComplete.cmd`
@@ -98,6 +98,7 @@ Main responsibilities:
 - Registers `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Run\CodexFirstBoot`.
 - Uses `Run`, not `RunOnce`, so first-logon setup can retry on later logons.
 - Points the Run entry at `wscript.exe` and `firstboot-launcher.vbs` so logon does not flash a blank console window.
+- If Docker Desktop already exists, registers `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Run\DockerDesktopAutoStart`.
 
 ### `templates\firstboot-launcher.vbs`
 
@@ -110,7 +111,6 @@ Main responsibilities:
 - If `C:\Payload\DockerImages` does not exist, it marks completion and unregisters itself.
 - If `C:\Payload\DockerImages` exists but contains no ordered `NN-name` service directories, it also marks completion and unregisters itself.
 - If `docker.exe` is missing, it exits with code `1` so Windows runs it again at the next logon.
-- If Docker Desktop is installed, it registers `HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Run\DockerDesktopAutoStart` for future auto-start.
 - For the current first-logon run, it starts Docker Desktop in the background with `docker desktop start`, falling back to `Docker Desktop.exe` when needed.
 - It waits for the `Docker Desktop` process to appear, then performs a short `docker info` readiness check.
 - If Docker becomes ready, it scans ordered `C:\Payload\DockerImages\NN-name\` service directories.
@@ -119,9 +119,9 @@ Main responsibilities:
   - `install_service.bat`
 - If a service directory contains neither of those scripts, it is logged and skipped.
 - Payload logs are written as `C:\ProgramData\FirstBoot\PayloadLogs\<service>_<script>_<timestamp>.log`.
-- `load_images.bat` and `install_service.bat` run in visible `cmd.exe` windows, display a do-not-close notice, and close automatically on success.
-- `10-win11-install\install_service.bat` opens a detached 1Panel credential window after success.
-- `20-CIKE-install\install_service.bat` opens a detached CIKE success window after success.
+- `load_images.bat` and `install_service.bat` run in visible `cmd.exe` windows; their own batch logic controls console text and close behavior.
+- Service names matching `*win11-install` open a detached 1Panel credential window after `install_service.bat` succeeds.
+- Service names matching `*CIKE-install` open a detached CIKE success window after `install_service.bat` succeeds.
 - Final success popups are detached and do not block the first-logon flow from completing.
 - It creates `done.tag` and removes the Run entry only when all detected payload scripts return exit code `0`.
 
