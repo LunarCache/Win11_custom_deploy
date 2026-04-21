@@ -1,6 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <unattend xmlns="urn:schemas-microsoft-com:unattend"
           xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
+    <!--
+    OOBE pass: Skip OOBE pages for automated deployment.
+    HideOnlineAccountScreens: Skip Microsoft account sign-in
+    HideLocalAccountScreen: Skip local account creation screen  
+    HideWirelessSetupInOOBE: Skip network setup
+    ProtectYourPC: 3 = Off (skip Express Settings)
+
+    Note: generalize pass (PersistAllDeviceInstalls) is NOT needed here because:
+    - DISM /Add-Driver injects drivers directly into the offline Driver Store
+    - The deployment flow does NOT run sysprep /generalize after driver injection
+    - Drivers persist because there's no sysprep step that would remove them
+    -->
     <settings pass="oobeSystem">
         <component name="Microsoft-Windows-Shell-Setup"
                    processorArchitecture="amd64"
@@ -9,6 +21,9 @@
                    versionScope="nonSxS">
             <OOBE>
                 <HideWirelessSetupInOOBE>true</HideWirelessSetupInOOBE>
+                <!-- <HideOnlineAccountScreens>true</HideOnlineAccountScreens>
+                <HideLocalAccountScreen>true</HideLocalAccountScreen> -->
+                <ProtectYourPC>3</ProtectYourPC>
             </OOBE>
         </component>
     </settings>
