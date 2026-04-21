@@ -3,10 +3,24 @@
 ## Project Structure & Module Organization
 This repository builds and packages a customized WinPE deployment environment for Windows 11.
 
-- `scripts/`: primary PowerShell entry points such as `Build-WinPEAutoDeploy.ps1`, `Prepare-WinPEUsb.ps1`, and shared helpers in `Common-WinPEHelpers.ps1`.
-- `templates/`: injected runtime assets and deployment templates, including `deploy.cmd`, `startnet.cmd`, `unattend.xml`, and first-boot scripts.
+- `scripts/`: primary PowerShell entry points and helpers:
+  - `Build-WinPEAutoDeploy.ps1` - builds WinPE work directory and injects automation
+  - `Prepare-WinPEUsb.ps1` - prepares dual-partition USB deployment media
+  - `Generate-WinPEIso.ps1` - packages work directory as ISO
+  - `Export-CleanWinPEIso.ps1` - produces stock WinPE ISO
+  - `Common-WinPEHelpers.ps1` - shared helper functions used by all scripts
+- `templates/`: injected runtime assets and deployment templates:
+  - `startnet.cmd` - WinPE bootstrap entry
+  - `deploy.cmd` - main deployment logic
+  - `unattend.xml` - OOBE configuration
+  - `SetupComplete.cmd` - post-deployment WinRE setup
+  - `register-firstboot.ps1` - registers first-logon automation
+  - `firstboot-launcher.vbs` - VBS wrapper for hidden execution
+  - `firstboot.ps1` - Docker payload orchestration on first logon
 - `docs/`: design notes, technical solution documents, SOPs, ISO creation guides, and generated delivery documents such as `.docx`.
-- `payload/`: optional deployment payload staging assets used after first logon, when present.
+- `payload/`: optional deployment payload staging assets:
+  - `docker-images/` - Docker payload directories for first-logon automation
+  - `drivers/` - out-of-box driver packages organized by category (chipset, graphics, network, audio)
 - `README.md`: operator workflow, prerequisites, and runtime behavior. Keep it aligned with script changes.
 
 ## Build, Test, and Development Commands
@@ -20,12 +34,14 @@ Set-ExecutionPolicy -Scope Process Bypass -Force
 .\scripts\Export-CleanWinPEIso.ps1 -Force
 ```
 
-`Build-...` prepares `boot.wim`, `Prepare-...` creates the dual-partition USB, `Generate-...` packages the customized ISO, and `Export-Clean...` produces a stock WinPE ISO.
+`Build-...` prepares `boot.wim` with automation injected. It supports partition customization (Windows partition size, Data partition, Recovery size), driver injection via `-DriversDirectory`, and configurable target disk. `Prepare-...` creates the dual-partition USB. `Generate-...` packages the customized ISO (optionally bundling install.wim and payloads via temporary staging). `Export-Clean...` produces a stock WinPE ISO without automation.
 
 ## Coding Style & Naming Conventions
 Use PowerShell with 4-space indentation, `Set-StrictMode -Version Latest`, and `$ErrorActionPreference = 'Stop'` for operational scripts. Prefer approved verb-noun function names such as `New-DirectoryIfMissing`. Name scripts and helpers in PascalCase, and keep template token names uppercase with double underscores, for example `__TARGET_DISK__`.
 
-Favor small helper functions, explicit parameter validation, and ASCII output for WinPE-consumed batch or DiskPart files.
+All scripts should use `SupportsShouldProcess` for destructive operations and validate paths before any disk modifications. Scripts must import `Common-WinPEHelpers.ps1` for shared functions like `Set-AdkEnvironment`, `Test-IsAdministrator`, and `New-DirectoryIfMissing`.
+
+Favor small helper functions, explicit parameter validation with `[ValidateRange]`, `[ValidateSet]`, and ASCII output for WinPE-consumed batch or DiskPart files.
 
 For Chinese delivery `.docx` documents, use `宋体` for Chinese text and `Times New Roman` for Latin text, numbers, and technical identifiers. When a Markdown source has a matching generated `.docx`, update and validate both so the deliverable stays aligned with the source.
 
@@ -49,4 +65,10 @@ PRs should include:
 - screenshots or logs when changing runtime behavior or documentation output
 
 ## Safety & Configuration
-`Prepare-WinPEUsb.ps1` and WinPE runtime deployment both wipe disks. Do not relax disk checks without updating `README.md` and documenting the risk clearly. Keep ADK path assumptions, target disk defaults, and payload layout consistent across `scripts/`, `templates/`, and `docs/`.
+`Prepare-WinPEUsb.ps1`, WinPE runtime deployment (`deploy.cmd`), and DiskPart operations all wipe disks. Do not relax disk checks without updating `README.md` and documenting the risk clearly. Keep ADK path assumptions, target disk defaults, partition layouts, and payload directory structures consistent across `scripts/`, `templates/`, and `docs/`.
+
+Key safety checks in place:
+- `Prepare-WinPEUsb.ps1` refuses to operate on disks marked as `IsBoot` or `IsSystem`
+- `deploy.cmd` stops if zero or multiple valid image sources are found
+- Source discovery requires both `install.wim` and `winpe-autodeploy.tag` to prevent accidental deployment
+- Target disk is validated before any partition operations

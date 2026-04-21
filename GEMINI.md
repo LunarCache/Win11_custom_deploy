@@ -1,20 +1,23 @@
 # WinPE Auto Deploy Context
 
-This project provides a WinPE-based Windows deployment pipeline built around a customized `boot.wim`, a single prepared `install.wim` source, and optional first-logon Docker payload execution.
+This project provides a WinPE-based Windows deployment pipeline built around a customized `boot.wim`, a single prepared `install.wim` source, optional first-logon Docker payload execution, and optional out-of-box driver injection.
 
 ## Current implementation summary
 
 - Architecture is fixed to `amd64`.
 - Target boot mode is UEFI only.
-- The deployment target disk and WIM index are rendered into `deploy.cmd` during the build phase.
+- The deployment target disk, WIM index, and partition layout are rendered into `deploy.cmd` during the build phase.
+- Supports custom partition layouts: configurable Windows partition size, optional Data partition, configurable Recovery partition size
+- Supports out-of-box driver injection via `-DriversDirectory` parameter
 - Runtime source selection is strict: WinPE scans `C:` through `Z:` and requires exactly one volume containing both:
   - `\sources\install.wim`
   - `\sources\winpe-autodeploy.tag`
-- The target disk is wiped and repartitioned as GPT with:
+- The target disk is wiped and repartitioned as GPT with a configurable layout:
   - EFI `S:` (100 MB, FAT32, label `System`)
   - MSR (16 MB)
-  - Windows `W:` (NTFS, label `Windows`)
-  - Recovery `R:` (about 1024 MB, NTFS, label `Recovery`)
+  - Windows `W:` (NTFS, configurable label, auto-sized or fixed size)
+  - Optional Data `D:` (remaining space, configurable label)
+  - Recovery `R:` (configurable size, default 1024 MB, NTFS, label `Recovery`)
 
 ## Build-time components
 
@@ -24,6 +27,14 @@ This project provides a WinPE-based Windows deployment pipeline built around a c
 - Recreates ADK environment variables inside PowerShell.
 - Runs `copype.cmd`.
 - Mounts `media\sources\boot.wim`.
+- Supports partition customization via parameters:
+  - `-WindowsPartitionSizeGB` - fixed size or 0 for auto
+  - `-CreateDataPartition` - enables D: drive creation
+  - `-WindowsPartitionLabel` - custom label for Windows partition
+  - `-DataPartitionLabel` - custom label for Data partition
+  - `-RecoverySizeMB` - recovery partition size (default: 1024)
+- Supports out-of-box driver injection via `-DriversDirectory` parameter
+- Target disk supports `'auto'` (selects disk 0) or specific disk number
 - Injects these rendered templates into `Windows\System32` inside the mounted image:
   - `deploy.cmd`
   - `diskpart-uefi.txt`
@@ -33,18 +44,20 @@ This project provides a WinPE-based Windows deployment pipeline built around a c
   - `register-firstboot.ps1`
   - `SetupComplete.cmd`
   - `unattend.xml`
+- Optionally embeds drivers into `Windows\System32\drivers-payload`
 
 ### `scripts\Prepare-WinPEUsb.ps1`
 
 - Requires Administrator.
-- Destructively rebuilds the selected disk as `MBR`.
+- Destructively rebuilds the selected disk as `MBR` for removable-media compatibility.
 - Creates:
   - FAT32 boot partition labeled `WINPE`
   - NTFS data partition labeled `IMAGES`
 - Uses `MakeWinPEMedia.cmd /UFD` for the boot partition.
 - Copies `install.wim` and the marker file to `\sources`.
+- Boot partition size is configurable via `-BootPartitionSizeMB` (default 2048 MB, range 1024-32768).
+- Refuses to operate on disks marked as `IsBoot` or `IsSystem`.
 - Optionally copies payloads to `\payload\docker-images`.
-- Validates an optional `-DockerImagesDirectory` before any disk-wiping step.
 
 ### `scripts\Generate-WinPEIso.ps1`
 
@@ -52,6 +65,15 @@ This project provides a WinPE-based Windows deployment pipeline built around a c
 - Can optionally inject `install.wim` and payloads into a temporary staging copy before packaging.
 - The original work directory is left unchanged after ISO creation.
 - Optional source paths are validated before staging, and the temporary staging tree is removed even if packaging later fails.
+
+### `scripts\Common-WinPEHelpers.ps1`
+
+- Shared helper functions imported by all scripts:
+  - `Set-AdkEnvironment` - bootstraps ADK environment variables
+  - `Test-IsAdministrator` - validates elevated PowerShell session
+  - `New-DirectoryIfMissing` - creates directories if they don't exist
+  - `Write-Log` - centralized logging function
+  - `Invoke-WithLogging` - executes commands with error handling and logging
 
 ### `scripts\Export-CleanWinPEIso.ps1`
 
@@ -74,19 +96,25 @@ Main responsibilities:
 4. Partition the disk.
 5. Apply the selected image index with `DISM`.
 6. Run `BCDBoot`.
-7. Stage `unattend.xml`.
-8. Set WinRE image path with `W:\Windows\System32\reagentc.exe`.
-9. Stage first-logon scripts into the deployed OS.
-10. Copy optional payload files from `\payload\docker-images`.
-11. Persist logs and shut down WinPE.
+7. If `X:\drivers-payload` exists, inject all out-of-box drivers using `DISM /Add-Driver /Recurse` into the deployed Windows Driver Store.
+8. Stage `unattend.xml` to `W:\Windows\Panther\unattend.xml`.
+9. Set WinRE image path with `W:\Windows\System32\reagentc.exe`.
+10. Stage first-logon scripts into the deployed OS.
+11. Copy optional payload files from `\payload\docker-images`.
+12. Persist logs in multiple locations:
+    - `X:\AutoDeploy.log`
+    - `W:\Windows\Temp\AutoDeploy.log`
+    - `\<deployment-media>\DeployLogs\AutoDeploy.log` when source media is available
+13. Shut down WinPE.
 
 ## Post-deployment components
 
 ### `templates\unattend.xml`
 
-- Hides only the wireless network setup page during OOBE.
-- Does not set locale, region, account creation, product key, or other OOBE answers.
-- Leaves the rest of the first-run Windows setup flow unchanged.
+- Configures OOBE bypass for automated deployment.
+- oobeSystem pass: Skips network setup and privacy settings. Account creation screens remain visible.
+- Does not configure locale, product key, or other OOBE answers.
+- Note: generalize pass is not needed because the deployment flow does not run sysprep after driver injection.
 
 ### `templates\SetupComplete.cmd`
 
@@ -134,6 +162,10 @@ Important limitation:
 
 - All build and media-preparation scripts assume Windows ADK is installed under:
   - `C:\Program Files (x86)\Windows Kits\10\Assessment and Deployment Kit`
-- `Prepare-WinPEUsb.ps1` refuses to touch disks reported as boot/system disks.
+- `Prepare-WinPEUsb.ps1` refuses to touch disks reported as boot/system disks (`IsBoot` or `IsSystem`).
 - The deployment process stops before disk changes if zero or multiple valid sources are found.
-- Logs are preserved to the deployed OS and, when possible, back to the deployment media.
+- Logs are preserved to multiple locations for troubleshooting:
+  - `X:\AutoDeploy.log` (WinPE runtime)
+  - `C:\Windows\Temp\AutoDeploy.log` (deployed OS)
+  - `\<deployment-media>\DeployLogs\AutoDeploy.log` (when media is available)
+- Driver injection at deploy time uses `DISM /Add-Driver /Recurse` on `X:\drivers-payload`.
