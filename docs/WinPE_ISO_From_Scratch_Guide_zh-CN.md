@@ -27,7 +27,8 @@
   - 负责构建项目专用 WinPE 工作目录。
   - 通过 `copype.cmd` 建立标准 WinPE 目录树。
   - 挂载 `media\sources\boot.wim`。
-  - 把 `deploy.cmd`、`diskpart-uefi.txt`、`startnet.cmd`、`unattend.xml` 以及首登自动化脚本注入 `Windows\System32`。
+  - 把 `deploy.cmd`、`startnet.cmd`、`unattend.xml` 以及首登自动化脚本注入 `Windows\System32`。
+  - 分区脚本由 `deploy.cmd` 动态生成，不再使用独立的 `diskpart-uefi.txt` 模板文件。
   - 仅注入运行逻辑，不会把 `install.wim` 直接写进 `boot.wim`。
 
 - `scripts/Generate-WinPEIso.ps1`
@@ -59,24 +60,16 @@
   - WinPE 内的主部署脚本。
   - 从 `C:` 到 `Z:` 扫描唯一合法镜像源。
   - 合法源必须同时存在 `\sources\install.wim` 与 `\sources\winpe-autodeploy.tag`。
-  - 根据模板化的 `diskpart-uefi.txt` 清空目标盘并创建 EFI、MSR、Windows、Recovery 四个分区。
+  - 动态生成 DiskPart 脚本并清空目标盘，创建可配置的 GPT 分区布局（EFI、MSR、Windows、可选 Data、Recovery）。
   - 使用 `DISM /Apply-Image` 应用指定索引。
   - 使用 `BCDBoot` 重建 UEFI 启动文件。
   - 把 `unattend.xml`、`SetupComplete.cmd` 与首登脚本注入到部署后的系统。
   - 如果源介质包含 `\payload\docker-images`，则复制到 `W:\Payload\DockerImages`。
   - 把日志保存到 WinPE RAM 盘、已部署系统和源介质。
 
-- `templates/diskpart-uefi.txt`
-  - 目标机磁盘分区模板。
-  - 当前实现固定为：
-    - EFI 100 MB (FAT32, System), 盘符 `S:`
-    - MSR 16 MB
-    - Windows 主分区 (NTFS, Windows), 盘符 `W:`
-    - Recovery 分区 (NTFS, Recovery), 盘符 `R:`
-
 - `templates/unattend.xml`
-  - 当前仅隐藏 OOBE 无线网络页面。
-  - 不配置语言、区域、账户、产品密钥或其他 OOBE 应答。
+  - 配置 OOBE 跳过：隐藏网络设置和隐私设置页面。账户创建页面保持可见。
+  - 不配置语言、区域、产品密钥或其他 OOBE 应答。
 
 - `templates/SetupComplete.cmd`
   - 在部署后启用 WinRE，随后执行 `register-firstboot.ps1` 注册首登自动化任务。
@@ -513,8 +506,8 @@ C:\WinPE_AutoDeploy_amd64\WinPE_AutoDeploy_amd64.iso
 2. 调用 `deploy.cmd`
 3. `deploy.cmd` 扫描 `C:` 到 `Z:` 的所有已挂载卷
 4. 必须且只能找到一个合法镜像源
-5. 使用 `diskpart-uefi.txt` 清空 `TargetDisk`
-6. 创建 EFI、MSR、Windows、Recovery 四个分区
+5. 动态生成 DiskPart 脚本并清空目标磁盘
+6. 创建 EFI、MSR、Windows、可选 Data、Recovery 分区
 7. 对 `W:\` 执行 `DISM /Apply-Image`
 8. 对 `S:\` 执行 `BCDBoot`
 9. 将 `unattend.xml` 写入 `W:\Windows\Panther`
@@ -630,7 +623,7 @@ Get-Partition -DiskNumber 1 | Select-Object PartitionNumber, DriveLetter, Type, 
 
 ### 14.3 目标盘误清空风险
 
-`Build-WinPEAutoDeploy.ps1` 中的 `-TargetDisk` 会被写入 `diskpart-uefi.txt`，最终由 WinPE 直接执行。交付前必须明确目标盘编号约定，并优先在虚拟机验证。
+`Build-WinPEAutoDeploy.ps1` 中的 `-TargetDisk` 会被渲染到 `deploy.cmd` 中，最终由 WinPE 执行。交付前必须明确目标盘编号约定，并优先在虚拟机验证。
 
 ### 14.4 install.wim 版本漂移风险
 

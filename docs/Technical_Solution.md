@@ -31,13 +31,10 @@ The solution is divided into three runtime stages:
 ### 3.2 WinPE Runtime
 
 - `templates/startnet.cmd` initializes WinPE and transfers control to `deploy.cmd`.
-- `templates/deploy.cmd` performs source discovery, GPT partitioning (EFI 100MB, MSR 16MB, Windows Primary, Recovery ~1024MB), image apply, BCDBoot, WinRE path configuration, log preservation, and first-boot asset staging. The unattend, WinRE path, and first-logon staging steps are warning-only; failures are logged but do not stop a successful image apply and boot configuration.
-- `templates/diskpart-uefi.txt` defines the exact partition layout:
-  - EFI: 100MB (FAT32, label "System", S:)
-  - MSR: 16MB
-  - Windows: Primary (NTFS, label "Windows", W:)
-  - Recovery: Primary (NTFS, label "Recovery", R:)
-- `templates/unattend.xml` hides only the wireless network setup page in OOBE. It does not configure language, region, account creation, product key, or other OOBE answers.
+- `templates/deploy.cmd` performs source discovery, GPT partitioning (configurable EFI, MSR, Windows, Recovery layout), image apply, BCDBoot, WinRE path configuration, log preservation, driver injection, and first-boot asset staging. The unattend, WinRE path, and first-logon staging steps are warning-only; failures are logged but do not stop a successful image apply and boot configuration.
+- `templates/unattend.xml` configures OOBE bypass for automated deployment.
+  - oobeSystem pass: Skips network setup and privacy settings. Account creation screens remain visible.
+  - Does not configure locale, product key, or other OOBE answers.
 
 ### 3.3 First-Logon Automation
 
