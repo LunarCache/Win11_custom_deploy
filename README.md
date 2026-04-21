@@ -9,17 +9,19 @@ This repository builds a reusable UEFI-only WinPE deployment environment for app
 - Boots into WinPE and automatically searches `C:` through `Z:` for exactly one prepared source containing:
   - `\sources\install.wim`
   - `\sources\winpe-autodeploy.tag`
-- Wipes the configured target disk and recreates a fixed GPT layout:
+- Wipes the configured target disk and creates a configurable GPT layout:
   - EFI `S:` (100 MB)
   - MSR (16 MB)
-  - Windows `W:` (Primary)
-  - Recovery `R:` (approx. 1024 MB)
+  - Windows `W:` (Primary — auto or specified size)
+  - Optional Data `D:` (default 1024 MB, configurable)
+  - Recovery `R:` (default 1024 MB, configurable)
 - Applies the selected WIM index with `DISM`, rebuilds boot files with `BCDBoot`, and stages `unattend.xml`, `SetupComplete.cmd`, and first-logon scripts into the deployed OS.
 - Preserves the main deployment log to:
   - `X:\AutoDeploy.log`
   - `W:\Windows\Temp\AutoDeploy.log`
   - `\<deployment-media>\DeployLogs\AutoDeploy.log` when the source media is still available
 - Optionally copies `\payload\docker-images\*` from deployment media into `W:\Payload\DockerImages` (staged to `C:\Payload\DockerImages` in the deployed OS).
+- Optionally injects out-of-box drivers from `X:\drivers-payload` into the deployed Windows Driver Store using `DISM /Add-Driver /Recurse`.
 
 ## Repository layout
 
@@ -28,6 +30,7 @@ This repository builds a reusable UEFI-only WinPE deployment environment for app
   - Mounts `media\sources\boot.wim`.
   - Renders template tokens such as `__TARGET_DISK__` and `__WIM_INDEX__`.
   - Injects the runtime and post-deployment assets into `Windows\System32` inside the mounted image.
+  - Optionally embeds out-of-box drivers into `Windows\System32\drivers-payload` via `-DriversDirectory`.
 - `scripts\Prepare-WinPEUsb.ps1`
   - Destructively prepares a dual-partition USB disk (MBR for compatibility).
   - Uses `MakeWinPEMedia.cmd /UFD` to populate the FAT32 boot partition.
@@ -42,13 +45,13 @@ This repository builds a reusable UEFI-only WinPE deployment environment for app
 - `templates\deploy.cmd`
   - Main WinPE runtime entry.
   - Finds the source image, partitions the target disk, applies Windows, configures boot, stages files, and shuts down WinPE.
-- `templates\diskpart-uefi.txt`
-  - DiskPart template used at runtime.
 - `templates\startnet.cmd`
   - WinPE bootstrap entry point that runs `wpeinit` and then `deploy.cmd`.
 - `templates\unattend.xml`
-  - Offline OOBE setting that hides the wireless network setup page.
-  - Does not configure locale, account creation, product key, or other OOBE answers.
+  - Configures OOBE bypass for automated deployment.
+  - oobeSystem pass: Skips network setup and privacy settings. Account creation screens remain visible.
+  - Does not configure locale, product key, or other OOBE answers.
+  - Note: generalize pass is not needed because the deployment flow does not run sysprep after driver injection.
 - `templates\SetupComplete.cmd`
   - Runs `reagentc /enable` inside the deployed OS.
   - Runs `register-firstboot.ps1` to register the first-logon task.
@@ -65,6 +68,12 @@ This repository builds a reusable UEFI-only WinPE deployment environment for app
   - `*win11-install` service: Parses `C:\CloudPrimeAppstore\docker-compose.yml` to display 1Panel credentials, falling back to built-in defaults.
   - `*CIKE-install` service: Displays CIKE success information.
   - Removes the Run registration only after all detected payload scripts return exit code `0`.
+- `payload\docker-images\`
+  - Optional Docker payload directories staged into the deployed OS for first-logon automation.
+- `payload\drivers\`
+  - Optional out-of-box driver packages organized by category (chipset, graphics, network, audio).
+  - Drivers are embedded into the WinPE image at build time via `-DriversDirectory` and injected into the deployed Windows Driver Store at deploy time.
+  - See `payload\drivers\README.md` for placement rules and usage details.
 
 ## Requirements
 
@@ -89,7 +98,7 @@ Set-ExecutionPolicy -Scope Process Bypass -Force
   -Force `
   -WinPEWorkDir C:\WinPE_AutoDeploy_amd64 `
   -WimIndex 1 `
-  -TargetDisk 0
+  -TargetDisk auto
 ```
 
 Important defaults:
@@ -97,7 +106,42 @@ Important defaults:
 - `-Architecture amd64`
 - `-WinPEWorkDir C:\WinPE_AutoDeploy_amd64`
 - `-WimIndex 1`
-- `-TargetDisk 0`
+- `-TargetDisk auto` (selects the first disk, disk 0; or specify a disk number directly)
+
+With driver injection:
+
+```powershell
+.\scripts\Build-WinPEAutoDeploy.ps1 `
+  -Force `
+  -WinPEWorkDir C:\WinPE_AutoDeploy_amd64 `
+  -WimIndex 1 `
+  -TargetDisk auto `
+  -DriversDirectory C:\Drivers\MyHardware
+```
+
+The `-DriversDirectory` parameter embeds all driver files from the specified directory into the WinPE image at `Windows\System32\drivers-payload`. At deploy time, these drivers are injected into the target Windows Driver Store using `DISM /Add-Driver /Recurse`.
+
+With custom partition layout (256 GB C: + D: drive):
+
+```powershell
+.\scripts\Build-WinPEAutoDeploy.ps1 `
+  -Force `
+  -WinPEWorkDir C:\WinPE_AutoDeploy_amd64 `
+  -WimIndex 1 `
+  -TargetDisk auto `
+  -WindowsPartitionSizeGB 256 `
+  -CreateDataPartition `
+  -WindowsPartitionLabel "System" `
+  -DataPartitionLabel "Data"
+```
+
+Partition customization parameters:
+
+- `-WindowsPartitionSizeGB` — Size of Windows partition in GB. `0` (default) = use all remaining space minus Recovery.
+- `-CreateDataPartition` — If set, creates a D: partition using remaining space after Windows.
+- `-WindowsPartitionLabel` — Custom label for Windows partition (empty = no label).
+- `-DataPartitionLabel` — Custom label for Data partition (empty = default "Data").
+- `-RecoverySizeMB` — Recovery partition size in MB (default: 1024).
 
 ### 2. Prepare a deployment USB
 
@@ -164,6 +208,51 @@ By default this creates:
 - `C:\WinPE_Clean_amd64`
 - `C:\WinPE_Clean_amd64.iso`
 
+## Parameter format requirements
+
+To avoid ambiguity and runtime errors, all parameters follow strict format requirements:
+
+### Build parameters (`Build-WinPEAutoDeploy.ps1`)
+
+| Parameter | Type | Format | Valid Values | Default |
+|-----------|------|--------|--------------|---------|
+| `-Architecture` | String | Literal | `amd64` only | `amd64` |
+| `-WinPEWorkDir` | String | Path | Valid absolute or relative path | `C:\WinPE_AutoDeploy_amd64` |
+| `-WimIndex` | Integer | Number | `1` or higher | `1` |
+| `-TargetDisk` | String | `auto` or Number | `auto` or `0-9+` (disk number) | `auto` |
+| `-DriversDirectory` | String | Path (optional) | Valid directory path, omit if unused | *(none)* |
+| `-Force` | Switch | Flag | Present/absent | *(absent)* |
+| `-WindowsPartitionSizeGB` | Integer | Number | `0` = auto, or `1-2097151` GB | `0` |
+| `-CreateDataPartition` | Switch | Flag | Present/absent | *(absent)* |
+| `-WindowsPartitionLabel` | String | Label (optional) | Max 32 chars, **no double quotes** `"` | *(empty)* |
+| `-DataPartitionLabel` | String | Label (optional) | Max 32 chars, **no double quotes** `"` | *(empty = "Data")* |
+| `-RecoverySizeMB` | Integer | Number | `512-32768` MB | `1024` |
+
+**Important notes:**
+- **TargetDisk**: Must be either the literal string `auto` (selects first disk) or a non-negative integer (`0`, `1`, `2`, etc.)
+- **Partition labels**: Windows labels cannot contain double quotes `"`. Use single quotes or escape properly in PowerShell: `-WindowsPartitionLabel 'My System'`
+- **Partition sizes**: Use `0` for auto-sizing. Fixed sizes are specified in GB for Windows/Data partitions, MB for Recovery
+
+### USB preparation parameters (`Prepare-WinPEUsb.ps1`)
+
+| Parameter | Type | Format | Valid Values | Required |
+|-----------|------|--------|--------------|----------|
+| `-UsbDiskNumber` | Integer | Number | Disk number from `Get-Disk` | Yes |
+| `-Architecture` | String | Literal | `amd64` only | No |
+| `-WinPEWorkDir` | String | Path | Valid directory path | No |
+| `-InstallWimPath` | String | Path | Valid `.wim` file path | Yes |
+| `-DockerImagesDirectory` | String | Path (optional) | Valid directory path | No |
+| `-BootPartitionSizeMB` | Integer | Number | `1024-32768` MB | No (`2048`) |
+
+### ISO generation parameters (`Generate-WinPEIso.ps1`)
+
+| Parameter | Type | Format | Valid Values | Required |
+|-----------|------|--------|--------------|----------|
+| `-WinPEWorkDir` | String | Path | Valid directory path | Yes |
+| `-InstallWimPath` | String | Path (optional) | Valid `.wim` file path | No |
+| `-DockerImagesDirectory` | String | Path (optional) | Valid directory path | No |
+| `-Force` | Switch | Flag | Present/absent | No |
+
 ## Runtime behavior
 
 When the target machine boots into the prepared WinPE image:
@@ -171,14 +260,19 @@ When the target machine boots into the prepared WinPE image:
 1. `startnet.cmd` runs `wpeinit` and launches `deploy.cmd`.
 2. `deploy.cmd` scans `C:` through `Z:` for exactly one valid deployment source.
 3. If zero or multiple matches are found, deployment stops before touching the target disk.
-4. DiskPart wipes the configured target disk and creates the fixed GPT partition layout.
+4. DiskPart wipes the configured target disk and creates a configurable GPT partition layout:
+   - EFI `S:` (100 MB), MSR (16 MB), Windows `W:`, Recovery `R:`.
+   - Windows partition can be auto-sized (remaining space) or fixed size.
+    - Optional Data partition `D:` (remaining space after Windows).
 5. `DISM /Apply-Image` applies the configured WIM index to `W:\`.
 6. `BCDBoot` writes UEFI boot files to `S:\`.
-7. `unattend.xml` is staged to `W:\Windows\Panther\unattend.xml`.
-8. `W:\Windows\System32\reagentc.exe /Setreimage` points WinRE to `W:\Windows\System32\Recovery`.
-9. `firstboot.ps1`, `register-firstboot.ps1`, and `SetupComplete.cmd` are staged into the deployed OS.
-10. If present, `\payload\docker-images\*` is copied to `W:\Payload\DockerImages`.
-11. Logs are persisted and WinPE shuts down. The next power-on starts Windows OOBE from the deployed disk.
+7. If `X:\drivers-payload` exists, `DISM /Add-Driver /Recurse` injects all out-of-box drivers into the deployed Windows Driver Store.
+8. `unattend.xml` is staged to `W:\Windows\Panther\unattend.xml`. The unattend.xml file configures OOBE bypass:
+   - oobeSystem pass: Skips network setup and privacy settings. Account creation screens remain visible.
+9. `W:\Windows\System32\reagentc.exe /Setreimage` points WinRE to `W:\Windows\System32\Recovery`.
+10. `firstboot.ps1`, `register-firstboot.ps1`, and `SetupComplete.cmd` are staged into the deployed OS.
+11. If present, `\payload\docker-images\*` is copied to `W:\Payload\DockerImages`.
+12. Logs are persisted and WinPE shuts down. The next power-on starts Windows OOBE from the deployed disk.
 
 ## First-logon behavior
 
@@ -221,6 +315,10 @@ On deployment media:
 \payload\docker-images\20-CIKE-install\install_service.bat   optional
 \payload\docker-images\<NN-name>\*.tar                        optional
 \payload\docker-images\<NN-name>\<other files>               optional
+\payload\drivers\chipset\<driver .inf packages>               optional
+\payload\drivers\graphics\<driver .inf packages>              optional
+\payload\drivers\network\<driver .inf packages>               optional
+\payload\drivers\audio\<driver .inf packages>                 optional
 ```
 
 Inside the deployed OS after staging:
