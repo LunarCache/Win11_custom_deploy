@@ -16,7 +16,7 @@ This project provides a WinPE-based Windows deployment pipeline built around a c
   - EFI `S:` (100 MB, FAT32, label `System`)
   - MSR (16 MB)
   - Windows `W:` (NTFS, configurable label, auto-sized or fixed size)
-  - Optional Data `D:` (remaining space, configurable label)
+  - Optional Data partition (remaining space, configurable label)
   - Recovery `R:` (configurable size, default 1024 MB, NTFS, label `Recovery`)
 
 ## Build-time components
@@ -29,7 +29,7 @@ This project provides a WinPE-based Windows deployment pipeline built around a c
 - Mounts `media\sources\boot.wim`.
 - Supports partition customization via parameters:
   - `-WindowsPartitionSizeGB` - fixed size or 0 for auto
-  - `-CreateDataPartition` - enables D: drive creation
+  - `-CreateDataPartition` - enables Data partition creation
   - `-WindowsPartitionLabel` - custom label for Windows partition
   - `-DataPartitionLabel` - custom label for Data partition
   - `-RecoverySizeMB` - recovery partition size (default: 1024)

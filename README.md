@@ -13,7 +13,7 @@ This repository builds a reusable UEFI-only WinPE deployment environment for app
   - EFI `S:` (100 MB)
   - MSR (16 MB)
   - Windows `W:` (Primary — auto or specified size)
-  - Optional Data `D:` (default 1024 MB, configurable)
+  - Optional Data partition (default 1024 MB, configurable)
   - Recovery `R:` (default 1024 MB, configurable)
 - Applies the selected WIM index with `DISM`, rebuilds boot files with `BCDBoot`, and stages `unattend.xml`, `SetupComplete.cmd`, and first-logon scripts into the deployed OS.
 - Preserves the main deployment log to:
@@ -121,7 +121,7 @@ With driver injection:
 
 The `-DriversDirectory` parameter embeds all driver files from the specified directory into the WinPE image at `Windows\System32\drivers-payload`. At deploy time, these drivers are injected into the target Windows Driver Store using `DISM /Add-Driver /Recurse`.
 
-With custom partition layout (256 GB C: + D: drive):
+With custom partition layout (256 GB Windows + Data partition):
 
 ```powershell
 .\scripts\Build-WinPEAutoDeploy.ps1 `
@@ -138,7 +138,7 @@ With custom partition layout (256 GB C: + D: drive):
 Partition customization parameters:
 
 - `-WindowsPartitionSizeGB` — Size of Windows partition in GB. `0` (default) = use all remaining space minus Recovery.
-- `-CreateDataPartition` — If set, creates a D: partition using remaining space after Windows.
+- `-CreateDataPartition` — If set, creates a Data partition using remaining space after Windows.
 - `-WindowsPartitionLabel` — Custom label for Windows partition (empty = no label).
 - `-DataPartitionLabel` — Custom label for Data partition (empty = default "Data").
 - `-RecoverySizeMB` — Recovery partition size in MB (default: 1024).
@@ -263,7 +263,7 @@ When the target machine boots into the prepared WinPE image:
 4. DiskPart wipes the configured target disk and creates a configurable GPT partition layout:
    - EFI `S:` (100 MB), MSR (16 MB), Windows `W:`, Recovery `R:`.
    - Windows partition can be auto-sized (remaining space) or fixed size.
-    - Optional Data partition `D:` (remaining space after Windows).
+    - Optional Data partition (remaining space after Windows).
 5. `DISM /Apply-Image` applies the configured WIM index to `W:\`.
 6. `BCDBoot` writes UEFI boot files to `S:\`.
 7. If `X:\drivers-payload` exists, `DISM /Add-Driver /Recurse` injects all out-of-box drivers into the deployed Windows Driver Store.

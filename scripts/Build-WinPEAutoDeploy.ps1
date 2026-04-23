@@ -23,7 +23,7 @@
 
     Partition customization parameters:
     -WindowsPartitionSizeGB  Size of the Windows partition in GB. 0 = auto (use remaining space).
-    -CreateDataPartition     If set, creates a D: partition after Windows using remaining space.
+    -CreateDataPartition     If set, creates a Data partition after Windows using remaining space.
     -WindowsPartitionLabel   Custom label for the Windows partition (empty = no label).
     -DataPartitionLabel      Custom label for the Data partition (empty = default "Data").
     -RecoverySizeMB          Recovery partition size in MB (default: 1024).
@@ -41,10 +41,10 @@ param(
     # Target disk for deployment. 'auto' = selects the first disk (disk 0).
     # Specify a disk number directly to target a specific disk.
     [ValidateScript({
-        if ($_ -eq 'auto') { return $true }
-        if ($_ -match '^\d+$') { return $true }
-        throw "TargetDisk must be 'auto' or a numeric disk number."
-    })]
+            if ($_ -eq 'auto') { return $true }
+            if ($_ -match '^\d+$') { return $true }
+            throw "TargetDisk must be 'auto' or a numeric disk number."
+        })]
     [string]$TargetDisk = 'auto',
 
     # Root path of the Windows ADK installation.

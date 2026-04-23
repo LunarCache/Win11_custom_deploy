@@ -179,7 +179,7 @@ if "%WINDOWS_PARTITION_SIZE%"=="0" (
     )
     >> "%DISKPART_SCRIPT%" echo assign letter=W
 
-    rem Optional Data partition (D:)
+    rem Optional Data partition
     if "%CREATE_DRIVE_D%"=="1" (
         >> "%DISKPART_SCRIPT%" echo create partition primary
         >> "%DISKPART_SCRIPT%" echo shrink minimum=%RECOVERY_SIZE%
@@ -188,21 +188,20 @@ if "%WINDOWS_PARTITION_SIZE%"=="0" (
         ) else (
             >> "%DISKPART_SCRIPT%" echo format quick fs=ntfs label="Data"
         )
-        >> "%DISKPART_SCRIPT%" echo assign letter=D
     )
 )
 
 rem Recovery partition
-rem When Windows size is specified and no D: drive is created, Recovery must be
+rem When Windows size is specified and no Data partition is created, Recovery must be
 rem explicitly sized. Otherwise it would consume all remaining disk space.
 if "%WINDOWS_PARTITION_SIZE%"=="0" (
     rem Auto-size Windows: Recovery space already reserved via shrink
     >> "%DISKPART_SCRIPT%" echo create partition primary
 ) else if not "%CREATE_DRIVE_D%"=="1" (
-    rem Fixed Windows size, no D: drive: explicit Recovery size
+    rem Fixed Windows size, no Data partition: explicit Recovery size
     >> "%DISKPART_SCRIPT%" echo create partition primary size=%RECOVERY_SIZE%
 ) else (
-    rem Fixed Windows + D: drive: Recovery space already reserved via shrink on D:
+    rem Fixed Windows + Data partition: Recovery space already reserved via shrink on Data partition
     >> "%DISKPART_SCRIPT%" echo create partition primary
 )
 >> "%DISKPART_SCRIPT%" echo format quick fs=ntfs label="Recovery"

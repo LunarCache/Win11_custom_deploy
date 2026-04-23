@@ -188,7 +188,7 @@ Set-ExecutionPolicy -Scope Process Bypass -Force
 3. Windows 主分区，盘符 `W:` (NTFS, 大小可配置)
 4. Recovery 分区，约 1024 MB，盘符 `R:` (NTFS, label "Recovery")
 
-若指定了 `-WindowsPartitionSizeGB` 和 `-CreateDataPartition`，则会在 Windows 和 Recovery 之间增加 Data 分区（盘符 `D:`）。
+若指定了 `-WindowsPartitionSizeGB` 和 `-CreateDataPartition`，则会在 Windows 和 Recovery 之间增加 Data 分区。
 
 随后脚本会执行以下动作：
 
