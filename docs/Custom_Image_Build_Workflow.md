@@ -167,7 +167,7 @@ Start-Process "wsl.exe" -Wait
 # 2. 安装 Docker Desktop
 Start-Process "Docker Desktop Installer.exe" -ArgumentList "install --quiet --accept-license --backend=wsl-2" -Wait
 
-# 3. 安装其他软件(如ClawX)
+# 3. 安装其他软件(如ClawX)或驱动
 # 注意：安装路径应选择在 C:\Program Files\ 或 C:\Program Files (x86)\ 下，避免安装在用户目录，选择"为所有用户安装"（如果有此选项）
 
 # 4. 清理安装缓存（可选）
@@ -177,7 +177,7 @@ Remove-Item -Path "C:\Users\Administrator\AppData\Local\Temp\*" -Recurse -Force 
 
 ### 1.4 准备 sysprep（可选：创建 unattend.xml）
 
-如果需要在 sysprep 时保留驱动（预期后续再捕获），创建 `C:\Windows\Panther\unattend.xml`：
+如果需要在 sysprep 时保留驱动，创建 `C:\Windows\Panther\unattend.xml`：
 
 ```xml
 <?xml version="1.0" encoding="utf-8"?>
