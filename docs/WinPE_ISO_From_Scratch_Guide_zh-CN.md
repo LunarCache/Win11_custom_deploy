@@ -17,7 +17,7 @@
 ## 1.1 项目链接
 
 - GitHub 仓库地址：https://github.com/LunarCache/Win11_custom_deploy
-- 本地仓库路径：`/Users/wzc/workspace/github/Win11_custom_deploy`
+- 本地仓库路径：`C:\Users\ERAZER\workspace\Intern\Win11_custom_deploy`
 
 ## 2. 仓库内关键文件与职责
 
@@ -28,6 +28,7 @@
   - 通过 `copype.cmd` 建立标准 WinPE 目录树。
   - 挂载 `media\sources\boot.wim`。
   - 把 `deploy.cmd`、`startnet.cmd`、`unattend.xml` 以及首登自动化脚本注入 `Windows\System32`。
+  - 可选通过 `-DriversDirectory` 把离线驱动目录嵌入到 `boot.wim` 根目录下的 `X:\drivers-payload`。
   - 分区脚本由 `deploy.cmd` 动态生成，不再使用独立的 `diskpart-uefi.txt` 模板文件。
   - 仅注入运行逻辑，不会把 `install.wim` 直接写进 `boot.wim`。
 
@@ -63,6 +64,7 @@
   - 动态生成 DiskPart 脚本并清空目标盘，创建可配置的 GPT 分区布局（EFI、MSR、Windows、可选 Data、Recovery）。
   - 使用 `DISM /Apply-Image` 应用指定索引。
   - 使用 `BCDBoot` 重建 UEFI 启动文件。
+  - 如果 `X:\drivers-payload` 存在，则使用 `DISM /Add-Driver /Recurse` 注入离线驱动。
   - 把 `unattend.xml`、`SetupComplete.cmd` 与首登脚本注入到部署后的系统。
   - 如果源介质包含 `\payload\docker-images`，则复制到 `W:\Payload\DockerImages`。
   - 把日志保存到 WinPE RAM 盘、已部署系统和源介质。
@@ -120,8 +122,8 @@ C:\Program Files (x86)\Windows Kits\10\Assessment and Deployment Kit
 建议原则：
 
 - 如果条件允许，优先选择与目标 Windows 版本相匹配的 ADK
-- 对常见 Windows 11 部署场景，微软当前公开的通用版本为 `Windows ADK 10.1.26100.2454 (December 2024)`
-- 对该版本，微软还建议额外应用最新 ADK patch
+- 以微软官方 ADK 下载页为准选择版本，不在本文档中固定某个最新版本号
+- 如果所选 ADK 版本发布了 servicing patch，应按微软官方说明安装对应补丁
 
 推荐执行顺序如下：
 
@@ -315,7 +317,7 @@ Set-ExecutionPolicy -Scope Process Bypass -Force
   -Force `
   -WinPEWorkDir C:\WinPE_AutoDeploy_amd64 `
   -WimIndex 1 `
-  -TargetDisk 0
+  -TargetDisk auto
 ```
 
 该步骤的真实行为如下：
@@ -325,10 +327,14 @@ Set-ExecutionPolicy -Scope Process Bypass -Force
 3. 使用 `copype.cmd` 创建标准 WinPE 目录树
 4. 挂载 `media\sources\boot.wim`
 5. 将模板文件渲染后注入挂载镜像的 `Windows\System32`
-6. 把 `__TARGET_DISK__` 与 `__WIM_INDEX__` 替换为实际参数值
+6. 把 `__TARGET_DISK__`、`__WIM_INDEX__` 以及分区参数替换为实际参数值
 7. 提交并卸载 `boot.wim`
 
 此阶段不会把 `install.wim` 放入 `boot.wim`，因此最终 ISO 或 USB 仍然需要额外提供 `\sources\install.wim` 和 `\sources\winpe-autodeploy.tag`。
+
+`-TargetDisk auto` 当前在 WinPE 运行时解析为磁盘 `0`，并不会根据磁盘容量、总线类型或是否可移动自动推断。若现场设备磁盘编号不稳定，应在交付前改用明确磁盘号并完成实机验证。
+
+如果需要离线驱动注入，可在构建阶段增加 `-DriversDirectory C:\Drivers\MyHardware`。该目录会被复制进 `boot.wim` 的 `X:\drivers-payload`，部署时由 `deploy.cmd` 注入到 `W:\`。最终 ISO 或 USB 上的 `payload\drivers` 目录不会被当前运行时自动扫描。
 
 ## 8. 准备可选的 Docker 载荷目录
 
@@ -510,11 +516,12 @@ C:\WinPE_AutoDeploy_amd64\WinPE_AutoDeploy_amd64.iso
 6. 创建 EFI、MSR、Windows、可选 Data、Recovery 分区
 7. 对 `W:\` 执行 `DISM /Apply-Image`
 8. 对 `S:\` 执行 `BCDBoot`
-9. 将 `unattend.xml` 写入 `W:\Windows\Panther`
-10. 对已部署系统执行 `reagentc /Setreimage`
-11. 注入 `SetupComplete.cmd`、`firstboot.ps1`、`register-firstboot.ps1` 与 `firstboot-launcher.vbs`
-12. 如存在 payload，则复制到 `W:\Payload\DockerImages`
-13. 保存日志并关机，下一次开机进入已部署 Windows 的 OOBE
+9. 如存在 `X:\drivers-payload`，则离线注入驱动
+10. 将 `unattend.xml` 写入 `W:\Windows\Panther`
+11. 对已部署系统执行 `reagentc /Setreimage`
+12. 注入 `SetupComplete.cmd`、`firstboot.ps1`、`register-firstboot.ps1` 与 `firstboot-launcher.vbs`
+13. 如存在 payload，则复制到 `W:\Payload\DockerImages`
+14. 保存日志并关机，下一次开机进入已部署 Windows 的 OOBE
 
 ## 11. 首次开机与首登后的行为
 
@@ -578,7 +585,7 @@ Set-ExecutionPolicy -Scope Process Bypass -Force
   -Force `
   -WinPEWorkDir C:\WinPE_AutoDeploy_amd64 `
   -WimIndex 1 `
-  -TargetDisk 0
+  -TargetDisk auto
 
 .\scripts\Generate-WinPEIso.ps1 `
   -WinPEWorkDir C:\WinPE_AutoDeploy_amd64 `

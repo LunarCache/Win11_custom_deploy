@@ -74,8 +74,8 @@
 
 | 工具 | 说明 | 下载 |
 |------|------|------|
-| Windows ADK | Windows 评估和部署套件 | https://docs.microsoft.com/windows-hardware/get-started/adk-install |
-| WinPEAdd-on | WinPE 附加组件 | 随 ADK 安装 |
+| Windows ADK | Windows 评估和部署套件，至少安装 Deployment Tools | https://learn.microsoft.com/windows-hardware/get-started/adk-install |
+| Windows PE add-on | 与 ADK 版本匹配的 WinPE 附加组件 | https://learn.microsoft.com/windows-hardware/get-started/adk-install |
 | 本项目 | Win11_custom_deploy | https://github.com/LunarCache/Win11_custom_deploy.git |
 
 ### 安装 ADK（管理员 PowerShell）
@@ -83,7 +83,7 @@
 ```powershell
 # 下载 ADK (以 Windows 11 ADK 为例)
 # 访问 https://learn.microsoft.com/windows-hardware/get-started/adk-install
-# 安装时选择：部署工具 + Windows 预安装环境 (WinPE)
+# 安装时选择：Deployment Tools；随后单独安装匹配版本的 Windows PE add-on
 
 # 验证安装
 Test-Path "C:\Program Files (x86)\Windows Kits\10\Assessment and Deployment Kit"
@@ -175,7 +175,7 @@ Remove-Item -Path "C:\Windows\Temp\*" -Recurse -Force -ErrorAction SilentlyConti
 Remove-Item -Path "C:\Users\Administrator\AppData\Local\Temp\*" -Recurse -Force -ErrorAction SilentlyContinue
 ```
 
-### 1.4 准备 sysprep（可选：创建 unattend.xml）（注：跳过此步骤暂时未验证）
+### 1.4 准备 sysprep（可选：创建 unattend.xml）
 
 如果需要在 sysprep 时保留驱动（预期后续再捕获），创建 `C:\Windows\Panther\unattend.xml`：
 
@@ -192,17 +192,6 @@ Remove-Item -Path "C:\Users\Administrator\AppData\Local\Temp\*" -Recurse -Force 
             <DoNotCleanUpNonPresentDevices>true</DoNotCleanUpNonPresentDevices>
         </component>
     </settings>
-    <settings pass="oobeSystem">
-        <component name="Microsoft-Windows-Shell-Setup"
-                   processorArchitecture="amd64"
-                   publicKeyToken="31bf3856ad364e35"
-                   language="neutral"
-                   versionScope="nonSxS">
-            <OOBE>
-                <HideWirelessSetupInOOBE>true</HideWirelessSetupInOOBE>
-            </OOBE>
-        </component>
-    </settings>
 </unattend>
 ```
 
@@ -216,7 +205,7 @@ Remove-Item -Path "C:\Users\Administrator\AppData\Local\Temp\*" -Recurse -Force 
 :: 打开命令提示符
 cd /d %WINDIR%\System32\Sysprep
 
-:: 方法一：使用 unattend.xml（暂时跳过未验证）
+:: 方法一：使用 unattend.xml
 sysprep /generalize /oobe /shutdown /unattend:C:\Windows\Panther\unattend.xml
 
 :: 方法二：不带 unattend.xml
@@ -332,15 +321,16 @@ Copy-Item E:\install.wim C:\WorkSpace\CustomImage\install.wim
 # 3. 准备 Docker payload（可选）
 New-Item -ItemType Directory -Path C:\WorkSpace\CustomImage\payload\docker-images -Force
 
-# payload 目录结构示例(具体参考仓库)：
+# payload 目录结构示例：
 # C:\WorkSpace\CustomImage\payload\docker-images\
 # ├── 10-win11-install\
 # │   ├── load_images.bat
-# │   └── images\
-# │       └── *.tar
+# │   ├── install_service.bat
+# │   └── *.tar
 # └── 20-CIKE-install\
 #     ├── load_images.bat
-#     └── images\
+#     ├── install_service.bat
+#     └── *.tar
 ```
 
 ### 3.2 构建 WinPE 自动部署镜像
@@ -357,13 +347,16 @@ cd C:\Win11_custom_deploy
   -WimIndex 1 `
   -TargetDisk auto
 
-# 可选：包含驱动
+# 可选：包含其他驱动
 .\scripts\Build-WinPEAutoDeploy.ps1 `
   -Force `
   -WinPEWorkDir C:\WinPE_AutoDeploy_amd64 `
   -WimIndex 1 `
   -TargetDisk auto `
   -DriversDirectory C:\WorkSpace\Drivers
+
+# -DriversDirectory 会在构建阶段把驱动树嵌入 boot.wim 的 X:\drivers-payload。
+# 当前部署运行时不会从 USB/ISO 的 payload\drivers 自动发现驱动。
 
 # 可选：自定义分区
 .\scripts\Build-WinPEAutoDeploy.ps1 `
@@ -417,7 +410,7 @@ Get-Disk | Where-Object BusType -eq USB | Select-Object Number, FriendlyName, Si
 4. WinPE 自动运行部署脚本
 5. 等待部署完成并自动关机
 6. 分离 ISO，重新启动
-7. OOBE 网络设置页面被自动隐藏，完成 OOBE 后进入桌面
+7. OOBE 网络设置页面被自动隐藏，账户创建等其他页面按 Windows 标准流程继续
 8. Docker payload 自动执行
 ```
 
@@ -443,6 +436,7 @@ Get-Disk | Where-Object BusType -eq USB | Select-Object Number, FriendlyName, Si
 | `W:\Windows\Temp\AutoDeploy.log` | 部署日志持久化到目标系统 |
 | `<USB>\DeployLogs\AutoDeploy.log` | 部署日志持久化到源介质（如可用） |
 | `C:\ProgramData\FirstBoot\firstboot.log` | 首次登录自动化日志 |
+| `C:\ProgramData\FirstBoot\register-firstboot.log` | 首登 Run 注册日志 |
 | `C:\ProgramData\FirstBoot\PayloadLogs\` | Docker payload 执行日志 |
 
 ---
@@ -561,3 +555,5 @@ USB 或 ISO 结构：
 │       └── 20-CIKE-install\
 └── [其他 WinPE 文件]
 ```
+
+驱动不属于上述介质运行时扫描结构。需要驱动注入时，在构建 `boot.wim` 时使用 `Build-WinPEAutoDeploy.ps1 -DriversDirectory`。

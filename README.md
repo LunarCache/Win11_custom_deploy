@@ -13,7 +13,7 @@ This repository builds a reusable UEFI-only WinPE deployment environment for app
   - EFI `S:` (100 MB)
   - MSR (16 MB)
   - Windows `W:` (Primary — auto or specified size)
-  - Optional Data partition (default 1024 MB, configurable)
+  - Optional Data partition using the remaining space after a fixed-size Windows partition
   - Recovery `R:` (default 1024 MB, configurable)
 - Applies the selected WIM index with `DISM`, rebuilds boot files with `BCDBoot`, and stages `unattend.xml`, `SetupComplete.cmd`, and first-logon scripts into the deployed OS.
 - Preserves the main deployment log to:
@@ -30,7 +30,7 @@ This repository builds a reusable UEFI-only WinPE deployment environment for app
   - Mounts `media\sources\boot.wim`.
   - Renders template tokens such as `__TARGET_DISK__` and `__WIM_INDEX__`.
   - Injects the runtime and post-deployment assets into `Windows\System32` inside the mounted image.
-  - Optionally embeds out-of-box drivers into `Windows\System32\drivers-payload` via `-DriversDirectory`.
+  - Optionally embeds out-of-box drivers into `X:\drivers-payload` via `-DriversDirectory`.
 - `scripts\Prepare-WinPEUsb.ps1`
   - Destructively prepares a dual-partition USB disk (MBR for compatibility).
   - Uses `MakeWinPEMedia.cmd /UFD` to populate the FAT32 boot partition.
@@ -73,7 +73,6 @@ This repository builds a reusable UEFI-only WinPE deployment environment for app
 - `payload\drivers\`
   - Optional out-of-box driver packages organized by category (chipset, graphics, network, audio).
   - Drivers are embedded into the WinPE image at build time via `-DriversDirectory` and injected into the deployed Windows Driver Store at deploy time.
-  - See `payload\drivers\README.md` for placement rules and usage details.
 
 ## Requirements
 
@@ -119,7 +118,7 @@ With driver injection:
   -DriversDirectory C:\Drivers\MyHardware
 ```
 
-The `-DriversDirectory` parameter embeds all driver files from the specified directory into the WinPE image at `Windows\System32\drivers-payload`. At deploy time, these drivers are injected into the target Windows Driver Store using `DISM /Add-Driver /Recurse`.
+The `-DriversDirectory` parameter embeds all driver files from the specified directory into the root of the WinPE image at `X:\drivers-payload`. At deploy time, these drivers are injected into the target Windows Driver Store using `DISM /Add-Driver /Recurse`.
 
 With custom partition layout (256 GB Windows + Data partition):
 
@@ -218,20 +217,20 @@ To avoid ambiguity and runtime errors, all parameters follow strict format requi
 |-----------|------|--------|--------------|---------|
 | `-Architecture` | String | Literal | `amd64` only | `amd64` |
 | `-WinPEWorkDir` | String | Path | Valid absolute or relative path | `C:\WinPE_AutoDeploy_amd64` |
-| `-WimIndex` | Integer | Number | `1` or higher | `1` |
+| `-WimIndex` | Integer | Number | Image index passed to `DISM /Apply-Image` | `1` |
 | `-TargetDisk` | String | `auto` or Number | `auto` or `0-9+` (disk number) | `auto` |
 | `-DriversDirectory` | String | Path (optional) | Valid directory path, omit if unused | *(none)* |
 | `-Force` | Switch | Flag | Present/absent | *(absent)* |
-| `-WindowsPartitionSizeGB` | Integer | Number | `0` = auto, or `1-2097151` GB | `0` |
+| `-WindowsPartitionSizeGB` | Integer | Number | `0` = auto, or a fixed Windows size in GB | `0` |
 | `-CreateDataPartition` | Switch | Flag | Present/absent | *(absent)* |
-| `-WindowsPartitionLabel` | String | Label (optional) | Max 32 chars, **no double quotes** `"` | *(empty)* |
-| `-DataPartitionLabel` | String | Label (optional) | Max 32 chars, **no double quotes** `"` | *(empty = "Data")* |
-| `-RecoverySizeMB` | Integer | Number | `512-32768` MB | `1024` |
+| `-WindowsPartitionLabel` | String | Label (optional) | Windows volume label text; avoid double quotes `"` | *(empty)* |
+| `-DataPartitionLabel` | String | Label (optional) | Windows volume label text; avoid double quotes `"` | *(empty = "Data")* |
+| `-RecoverySizeMB` | Integer | Number | Recovery partition size in MB | `1024` |
 
 **Important notes:**
 - **TargetDisk**: Must be either the literal string `auto` (selects first disk) or a non-negative integer (`0`, `1`, `2`, etc.)
 - **Partition labels**: Windows labels cannot contain double quotes `"`. Use single quotes or escape properly in PowerShell: `-WindowsPartitionLabel 'My System'`
-- **Partition sizes**: Use `0` for auto-sizing. Fixed sizes are specified in GB for Windows/Data partitions, MB for Recovery
+- **Partition sizes**: Use `0` for auto-sizing the Windows partition. Fixed Windows size is specified in GB, and Recovery size is specified in MB. The optional Data partition uses the remaining space between Windows and Recovery.
 
 ### USB preparation parameters (`Prepare-WinPEUsb.ps1`)
 
@@ -243,14 +242,17 @@ To avoid ambiguity and runtime errors, all parameters follow strict format requi
 | `-InstallWimPath` | String | Path | Valid `.wim` file path | Yes |
 | `-DockerImagesDirectory` | String | Path (optional) | Valid directory path | No |
 | `-BootPartitionSizeMB` | Integer | Number | `1024-32768` MB | No (`2048`) |
+| `-AdkRoot` | String | Path | Windows ADK root path | No |
 
 ### ISO generation parameters (`Generate-WinPEIso.ps1`)
 
 | Parameter | Type | Format | Valid Values | Required |
 |-----------|------|--------|--------------|----------|
 | `-WinPEWorkDir` | String | Path | Valid directory path | Yes |
+| `-IsoPath` | String | Path (optional) | Output `.iso` path | No |
 | `-InstallWimPath` | String | Path (optional) | Valid `.wim` file path | No |
 | `-DockerImagesDirectory` | String | Path (optional) | Valid directory path | No |
+| `-AdkRoot` | String | Path | Windows ADK root path | No |
 | `-Force` | Switch | Flag | Present/absent | No |
 
 ## Runtime behavior
@@ -263,7 +265,7 @@ When the target machine boots into the prepared WinPE image:
 4. DiskPart wipes the configured target disk and creates a configurable GPT partition layout:
    - EFI `S:` (100 MB), MSR (16 MB), Windows `W:`, Recovery `R:`.
    - Windows partition can be auto-sized (remaining space) or fixed size.
-    - Optional Data partition (remaining space after Windows).
+   - Optional Data partition is created only when `-WindowsPartitionSizeGB` is fixed and `-CreateDataPartition` is set; it uses the remaining space before Recovery.
 5. `DISM /Apply-Image` applies the configured WIM index to `W:\`.
 6. `BCDBoot` writes UEFI boot files to `S:\`.
 7. If `X:\drivers-payload` exists, `DISM /Add-Driver /Recurse` injects all out-of-box drivers into the deployed Windows Driver Store.
@@ -315,11 +317,9 @@ On deployment media:
 \payload\docker-images\20-CIKE-install\install_service.bat   optional
 \payload\docker-images\<NN-name>\*.tar                        optional
 \payload\docker-images\<NN-name>\<other files>               optional
-\payload\drivers\chipset\<driver .inf packages>               optional
-\payload\drivers\graphics\<driver .inf packages>              optional
-\payload\drivers\network\<driver .inf packages>               optional
-\payload\drivers\audio\<driver .inf packages>                 optional
 ```
+
+Driver packages are not discovered from deployment media at runtime. Pass their source directory to `Build-WinPEAutoDeploy.ps1 -DriversDirectory`; the build embeds the tree into `boot.wim` as `X:\drivers-payload`.
 
 Inside the deployed OS after staging:
 

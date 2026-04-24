@@ -212,14 +212,14 @@ try {
     Write-RenderedTemplate -TemplatePath (Join-Path $templatesDir 'unattend.xml') -DestinationPath (Join-Path $system32Dir 'unattend.xml')
 
     # Embed drivers into the WinPE image if a driver directory was specified.
-    # Drivers are stored at X:\Windows\System32\drivers-payload and injected
+    # Drivers are stored at X:\drivers-payload and injected
     # into the target Windows Driver Store at deploy time via DISM /Add-Driver.
     if ($DriversDirectory) {
         if (-not (Test-Path -LiteralPath $DriversDirectory)) {
             throw "Drivers directory not found: $DriversDirectory"
         }
 
-        $driversPayloadDir = Join-Path $system32Dir 'drivers-payload'
+        $driversPayloadDir = Join-Path $mountDir 'drivers-payload'
         Write-Host "Embedding drivers from $DriversDirectory..." -ForegroundColor Cyan
 
         if (-not (Test-Path -LiteralPath $driversPayloadDir)) {
@@ -231,7 +231,9 @@ try {
             "`"$driversPayloadDir\`"",
             '/S', '/E', '/Y', '/Q'
         )
-        $xcopyExitCode = Start-Process -FilePath 'xcopy.exe' -ArgumentList $xcopyArgs -NoNewWindow -Wait -PassThru | Select-Object -ExpandProperty ExitCode
+        $process = Start-Process -FilePath 'xcopy.exe' -ArgumentList $xcopyArgs -NoNewWindow -Wait -PassThru
+        $process.WaitForExit()
+        $xcopyExitCode = $process.ExitCode
         if ($xcopyExitCode -ne 0) {
             throw "xcopy failed to copy drivers from $DriversDirectory to $driversPayloadDir (exit code: $xcopyExitCode)"
         }

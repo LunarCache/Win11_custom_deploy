@@ -7,8 +7,8 @@ This project provides a WinPE-based Windows deployment pipeline built around a c
 - Architecture is fixed to `amd64`.
 - Target boot mode is UEFI only.
 - The deployment target disk, WIM index, and partition layout are rendered into `deploy.cmd` during the build phase.
-- Supports custom partition layouts: configurable Windows partition size, optional Data partition, configurable Recovery partition size
-- Supports out-of-box driver injection via `-DriversDirectory` parameter
+- Supports custom partition layouts: configurable Windows partition size, optional remaining-space Data partition, configurable Recovery partition size.
+- Supports out-of-box driver injection via the `-DriversDirectory` parameter. Drivers are embedded into `boot.wim` as `X:\drivers-payload`; runtime deployment does not scan `payload\drivers` from USB or ISO media.
 - Runtime source selection is strict: WinPE scans `C:` through `Z:` and requires exactly one volume containing both:
   - `\sources\install.wim`
   - `\sources\winpe-autodeploy.tag`
@@ -16,7 +16,7 @@ This project provides a WinPE-based Windows deployment pipeline built around a c
   - EFI `S:` (100 MB, FAT32, label `System`)
   - MSR (16 MB)
   - Windows `W:` (NTFS, configurable label, auto-sized or fixed size)
-  - Optional Data partition (remaining space, configurable label)
+  - Optional Data partition (remaining space before Recovery when a fixed Windows size is used, configurable label)
   - Recovery `R:` (configurable size, default 1024 MB, NTFS, label `Recovery`)
 
 ## Build-time components
@@ -34,17 +34,16 @@ This project provides a WinPE-based Windows deployment pipeline built around a c
   - `-DataPartitionLabel` - custom label for Data partition
   - `-RecoverySizeMB` - recovery partition size (default: 1024)
 - Supports out-of-box driver injection via `-DriversDirectory` parameter
-- Target disk supports `'auto'` (selects disk 0) or specific disk number
+- Target disk supports `'auto'` (currently resolves to disk 0 at WinPE runtime) or a specific disk number.
 - Injects these rendered templates into `Windows\System32` inside the mounted image:
   - `deploy.cmd`
-  - `diskpart-uefi.txt`
   - `startnet.cmd`
   - `firstboot.ps1`
   - `firstboot-launcher.vbs`
   - `register-firstboot.ps1`
   - `SetupComplete.cmd`
   - `unattend.xml`
-- Optionally embeds drivers into `Windows\System32\drivers-payload`
+- Optionally embeds drivers into `X:\drivers-payload`
 
 ### `scripts\Prepare-WinPEUsb.ps1`
 
@@ -72,8 +71,10 @@ This project provides a WinPE-based Windows deployment pipeline built around a c
   - `Set-AdkEnvironment` - bootstraps ADK environment variables
   - `Test-IsAdministrator` - validates elevated PowerShell session
   - `New-DirectoryIfMissing` - creates directories if they don't exist
-  - `Write-Log` - centralized logging function
-  - `Invoke-WithLogging` - executes commands with error handling and logging
+  - `Invoke-ExternalCommand` - executes external tools and throws on non-zero exit
+  - `Write-WinPEAutoDeployTag` - writes the source marker file
+  - `Copy-DockerPayloadTree` - copies Docker payload directories
+  - `New-TemporaryDirectory` - creates temporary staging directories
 
 ### `scripts\Export-CleanWinPEIso.ps1`
 
@@ -92,8 +93,8 @@ Main responsibilities:
 
 1. Create and write `X:\AutoDeploy.log`.
 2. Find exactly one valid deployment source.
-3. Render `diskpart-uefi.txt` with the configured target disk.
-4. Partition the disk.
+3. Dynamically generate `X:\diskpart-runtime.txt` from rendered partition settings.
+4. Partition the configured target disk.
 5. Apply the selected image index with `DISM`.
 6. Run `BCDBoot`.
 7. If `X:\drivers-payload` exists, inject all out-of-box drivers using `DISM /Add-Driver /Recurse` into the deployed Windows Driver Store.
